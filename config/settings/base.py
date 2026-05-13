@@ -1,6 +1,7 @@
 import os
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 import dj_database_url
 
@@ -20,12 +21,31 @@ def env_bool(name, default=False):
 
 def env_list(name, default=""):
     raw = os.environ.get(name, default)
-    return [item.strip() for item in raw.split(",") if item.strip()]
+    return [clean_env_item(item) for item in raw.split(",") if clean_env_item(item)]
+
+
+def clean_env_item(value):
+    return value.strip().strip('"').strip("'")
+
+
+def env_origin_list(name, default=""):
+    return [item.rstrip("/") for item in env_list(name, default)]
+
+
+def env_host_list(name, default=""):
+    hosts = []
+    for item in env_list(name, default):
+        parsed = urlparse(item)
+        host = parsed.netloc or parsed.path
+        host = host.split("/")[0].rstrip("/")
+        if host:
+            hosts.append(host)
+    return hosts
 
 
 SECRET_KEY = env("DJANGO_SECRET_KEY", "unsafe-local-development-key")
 DEBUG = env_bool("DJANGO_DEBUG", False)
-ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+ALLOWED_HOSTS = env_host_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
 
 DJANGO_APPS = [
     "django.contrib.admin",
@@ -116,7 +136,7 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+CORS_ALLOWED_ORIGINS = env_origin_list("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 CORS_ALLOW_CREDENTIALS = True
 
 REST_FRAMEWORK = {
