@@ -14,7 +14,7 @@ class EmailLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = EmailLog
         fields = "__all__"
-        read_only_fields = fields
+        read_only_fields = [field.name for field in EmailLog._meta.fields]
 
 
 class SendInviteSerializer(serializers.Serializer):

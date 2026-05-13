@@ -7,14 +7,14 @@ class DownloadJobSerializer(serializers.ModelSerializer):
     class Meta:
         model = DownloadJob
         fields = "__all__"
-        read_only_fields = fields
+        read_only_fields = [field.name for field in DownloadJob._meta.fields]
 
 
 class DownloadLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = DownloadLog
         fields = "__all__"
-        read_only_fields = fields
+        read_only_fields = [field.name for field in DownloadLog._meta.fields]
 
 
 class DownloadRequestSerializer(serializers.Serializer):

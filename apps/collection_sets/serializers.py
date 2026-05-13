@@ -24,7 +24,7 @@ class SetStatsSerializer(serializers.ModelSerializer):
     class Meta:
         model = SetStats
         fields = "__all__"
-        read_only_fields = fields
+        read_only_fields = [field.name for field in SetStats._meta.fields]
 
 
 class SetCoverSerializer(serializers.Serializer):

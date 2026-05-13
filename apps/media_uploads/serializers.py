@@ -31,7 +31,7 @@ class UploadSessionSerializer(serializers.ModelSerializer):
 
         model = MediaUploadSession
         fields = "__all__"
-        read_only_fields = fields
+        read_only_fields = [field.name for field in MediaUploadSession._meta.fields]
 
 
 class BulkPresignUploadSerializer(serializers.Serializer):

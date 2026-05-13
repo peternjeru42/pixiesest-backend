@@ -23,7 +23,7 @@ class FavoriteListActivitySerializer(serializers.ModelSerializer):
     class Meta:
         model = FavoriteListActivity
         fields = "__all__"
-        read_only_fields = fields
+        read_only_fields = [field.name for field in FavoriteListActivity._meta.fields]
 
 
 class PublicFavoriteCreateSerializer(serializers.Serializer):
