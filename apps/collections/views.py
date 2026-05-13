@@ -9,6 +9,7 @@ from .models import Collection
 from .serializers import (
     CollectionDesignSettingsSerializer,
     CollectionDownloadSettingsSerializer,
+    MoveCollectionSerializer,
     CollectionPrivacySettingsSerializer,
     CollectionSerializer,
     ReorderCollectionSerializer,
@@ -55,6 +56,15 @@ class CollectionViewSet(viewsets.ModelViewSet):
     @decorators.action(detail=True, methods=["post"])
     def duplicate(self, request, collection_id=None):
         return response.Response(CollectionSerializer(duplicate_collection(self.get_object(), request.user)).data, status=status.HTTP_201_CREATED)
+
+    @decorators.action(detail=True, methods=["post", "patch"])
+    def move(self, request, collection_id=None):
+        collection = self.get_object()
+        serializer = MoveCollectionSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        collection.folder = serializer.validated_data["folder"]
+        collection.save(update_fields=["folder", "updated_at"])
+        return response.Response(CollectionSerializer(collection).data)
 
     @decorators.action(detail=True, methods=["post"], url_path="set-cover")
     def set_cover(self, request, collection_id=None):

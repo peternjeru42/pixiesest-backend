@@ -2,6 +2,7 @@ from django.contrib.auth.hashers import make_password
 from rest_framework import serializers
 
 from apps.core.utils import unique_slugify
+from apps.folders.models import Folder
 from apps.media_assets.models import MediaAsset
 
 from .models import Collection, CollectionDesignSettings, CollectionDownloadSettings, CollectionPrivacySettings
@@ -9,16 +10,37 @@ from .models import Collection, CollectionDesignSettings, CollectionDownloadSett
 
 class CollectionSerializer(serializers.ModelSerializer):
     download_pin = serializers.CharField(source="download_settings.download_pin", read_only=True)
+    folder_id = serializers.PrimaryKeyRelatedField(
+        source="folder",
+        queryset=Folder.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    folder_name = serializers.CharField(source="folder.name", read_only=True)
 
     class Meta:
         model = Collection
         fields = "__all__"
-        read_only_fields = ["id", "owner", "slug", "download_pin", "published_at", "created_at", "updated_at", "deleted_at"]
+        read_only_fields = [
+            "id",
+            "owner",
+            "slug",
+            "download_pin",
+            "folder_name",
+            "published_at",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+        ]
 
     def validate_folder(self, folder):
         if folder and folder.owner != self.context["request"].user:
             raise serializers.ValidationError("Folder not found.")
         return folder
+
+    def validate_folder_id(self, folder):
+        return self.validate_folder(folder)
 
     def create(self, validated_data):
         owner = self.context["request"].user
@@ -26,6 +48,28 @@ class CollectionSerializer(serializers.ModelSerializer):
         collection.slug = unique_slugify(collection, collection.title, queryset=Collection.all_objects.filter(owner=owner))
         collection.save()
         return collection
+
+
+class MoveCollectionSerializer(serializers.Serializer):
+    folder_id = serializers.PrimaryKeyRelatedField(
+        queryset=Folder.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    folder = serializers.PrimaryKeyRelatedField(
+        queryset=Folder.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
+    def validate(self, attrs):
+        if "folder_id" not in attrs and "folder" not in attrs:
+            raise serializers.ValidationError({"folder_id": "This field is required."})
+        folder = attrs.get("folder_id", attrs.get("folder"))
+        if folder and folder.owner != self.context["request"].user:
+            raise serializers.ValidationError({"folder_id": "Folder not found."})
+        attrs["folder"] = folder
+        return attrs
 
 
 class CollectionPrivacySettingsSerializer(serializers.ModelSerializer):
