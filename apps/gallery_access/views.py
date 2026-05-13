@@ -99,8 +99,6 @@ class DownloadPinVerifyView(views.APIView):
         serializer = DownloadPinSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         collection = Collection.objects.select_related("download_settings").get(id=serializer.validated_data["collection_id"])
-        ok = collection.download_settings.download_pin_enabled and check_password(
-            serializer.validated_data["pin"], collection.download_settings.download_pin_hash
-        )
+        ok = check_password(serializer.validated_data["pin"], collection.download_settings.download_pin_hash)
         AccessAttempt.objects.create(collection=collection, attempt_type="download_pin", success=ok)
         return Response({"valid": ok}, status=200 if ok else 403)

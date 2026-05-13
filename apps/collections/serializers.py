@@ -8,10 +8,12 @@ from .models import Collection, CollectionDesignSettings, CollectionDownloadSett
 
 
 class CollectionSerializer(serializers.ModelSerializer):
+    download_pin = serializers.CharField(source="download_settings.download_pin", read_only=True)
+
     class Meta:
         model = Collection
         fields = "__all__"
-        read_only_fields = ["id", "owner", "slug", "published_at", "created_at", "updated_at", "deleted_at"]
+        read_only_fields = ["id", "owner", "slug", "download_pin", "published_at", "created_at", "updated_at", "deleted_at"]
 
     def validate_folder(self, folder):
         if folder and folder.owner != self.context["request"].user:
@@ -48,18 +50,13 @@ class CollectionPrivacySettingsSerializer(serializers.ModelSerializer):
 
 
 class CollectionDownloadSettingsSerializer(serializers.ModelSerializer):
-    download_pin = serializers.CharField(write_only=True, required=False, allow_blank=True)
-
     class Meta:
         model = CollectionDownloadSettings
         exclude = ["download_pin_hash"]
-        read_only_fields = ["id", "collection", "created_at", "updated_at"]
+        read_only_fields = ["id", "collection", "download_pin", "download_pin_enabled", "created_at", "updated_at"]
 
     def update(self, instance, validated_data):
-        pin = validated_data.pop("download_pin", None)
-        if pin:
-            instance.download_pin_hash = make_password(pin)
-            instance.download_pin_enabled = True
+        validated_data["download_pin_enabled"] = True
         return super().update(instance, validated_data)
 
 

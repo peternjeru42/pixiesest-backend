@@ -29,7 +29,7 @@ def validate_download_access(request, collection, *, quality, media_asset=None, 
         raise GalleryAccessDenied("Web-size downloads are disabled.")
     if quality == "high_res" and not settings.allow_high_res_download:
         raise GalleryAccessDenied("High-res downloads are disabled.")
-    if settings.download_pin_enabled and not check_password(pin, settings.download_pin_hash):
+    if not check_password(pin, settings.download_pin_hash):
         raise GalleryAccessDenied("Valid download PIN required.")
     return True
 

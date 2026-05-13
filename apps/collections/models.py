@@ -1,7 +1,14 @@
 from django.conf import settings
+from django.core.validators import RegexValidator
 from django.db import models
 
 from apps.core.models import BaseUUIDModel, SoftDeleteModel, TimeStampedModel
+
+
+def generate_download_pin():
+    from secrets import randbelow
+
+    return f"{randbelow(10000):04d}"
 
 
 class Collection(BaseUUIDModel, TimeStampedModel, SoftDeleteModel):
@@ -57,13 +64,34 @@ class CollectionDownloadSettings(BaseUUIDModel, TimeStampedModel):
     single_photo_download_enabled = models.BooleanField(default=True)
     full_gallery_download_enabled = models.BooleanField(default=True)
     favorites_download_enabled = models.BooleanField(default=True)
-    download_pin_enabled = models.BooleanField(default=False)
+    download_pin_enabled = models.BooleanField(default=True)
+    download_pin = models.CharField(
+        max_length=4,
+        default=generate_download_pin,
+        validators=[RegexValidator(r"^\d{4}$", "Download PIN must be exactly 4 digits.")],
+    )
     download_pin_hash = models.CharField(max_length=255, blank=True)
     allow_original_download = models.BooleanField(default=True)
     allow_web_size_download = models.BooleanField(default=True)
     allow_high_res_download = models.BooleanField(default=True)
     web_size_px = models.PositiveIntegerField(default=2048)
     high_res_size_px = models.PositiveIntegerField(default=3600)
+
+    def save(self, *args, **kwargs):
+        from django.contrib.auth.hashers import make_password
+
+        if not self.download_pin:
+            self.download_pin = generate_download_pin()
+        self.download_pin_enabled = True
+        pin_changed = False
+        if self.pk and not self._state.adding:
+            old_pin = type(self).objects.filter(pk=self.pk).values_list("download_pin", flat=True).first()
+            pin_changed = old_pin != self.download_pin
+        if not self.download_pin_hash or self._state.adding or pin_changed:
+            self.download_pin_hash = make_password(self.download_pin)
+        if "update_fields" in kwargs and kwargs["update_fields"] is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {"download_pin", "download_pin_enabled", "download_pin_hash"}
+        super().save(*args, **kwargs)
 
 
 class CollectionDesignSettings(BaseUUIDModel, TimeStampedModel):

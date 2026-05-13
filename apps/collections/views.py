@@ -23,7 +23,7 @@ class CollectionViewSet(viewsets.ModelViewSet):
     lookup_url_kwarg = "collection_id"
 
     def get_queryset(self):
-        return Collection.objects.filter(owner=self.request.user).select_related("folder", "cover_asset")
+        return Collection.objects.filter(owner=self.request.user).select_related("folder", "cover_asset", "download_settings")
 
     def perform_destroy(self, instance):
         instance.delete()
