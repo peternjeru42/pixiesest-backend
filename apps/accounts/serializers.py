@@ -53,6 +53,10 @@ class LoginSerializer(TokenObtainPairSerializer):
         return {"refresh": str(refresh), "access": str(refresh.access_token), "user": UserSerializer(user).data}
 
 
+class GoogleAuthSerializer(serializers.Serializer):
+    credential = serializers.CharField()
+
+
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
