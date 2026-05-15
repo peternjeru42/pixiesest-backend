@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.contrib.auth import logout as django_logout
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
@@ -8,6 +9,7 @@ from rest_framework import generics, permissions, status
 from rest_framework.exceptions import AuthenticationFailed, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -128,10 +130,20 @@ class GoogleAuthView(APIView):
 
 
 class LogoutView(APIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_scope = "auth"
+
     def post(self, request):
         serializer = LogoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        RefreshToken(serializer.validated_data["refresh"]).blacklist()
+
+        try:
+            RefreshToken(serializer.validated_data["refresh"]).blacklist()
+        except TokenError:
+            # Logout should be idempotent for expired or already-blacklisted refresh tokens.
+            pass
+
+        django_logout(request)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
