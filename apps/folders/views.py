@@ -1,5 +1,6 @@
 from django.contrib.auth.hashers import make_password
 from django.db import transaction
+from django.db.models import Q
 from rest_framework import decorators, response, status, viewsets
 
 from apps.collections.serializers import CollectionSerializer
@@ -16,7 +17,11 @@ class FolderViewSet(viewsets.ModelViewSet):
     lookup_url_kwarg = "folder_id"
 
     def get_queryset(self):
-        return Folder.objects.filter(owner=self.request.user).select_related("cover_asset")
+        queryset = Folder.objects.filter(owner=self.request.user).select_related("cover_asset")
+        search = (self.request.query_params.get("search") or self.request.query_params.get("q") or "").strip()
+        if search:
+            queryset = queryset.filter(Q(name__icontains=search) | Q(slug__icontains=search))
+        return queryset
 
     def perform_destroy(self, instance):
         instance.delete()

@@ -8,8 +8,14 @@ from .models import Collection, CollectionDesignSettings, CollectionDownloadSett
 
 
 def create_default_collection_settings(collection):
-    CollectionPrivacySettings.objects.get_or_create(collection=collection)
     download_pin = generate_download_pin()
+    CollectionPrivacySettings.objects.get_or_create(
+        collection=collection,
+        defaults={
+            "is_password_enabled": True,
+            "password_hash": make_password(download_pin),
+        },
+    )
     CollectionDownloadSettings.objects.get_or_create(
         collection=collection,
         defaults={

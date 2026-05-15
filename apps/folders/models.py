@@ -6,7 +6,7 @@ from apps.core.models import BaseUUIDModel, SoftDeleteModel, TimeStampedModel
 
 class Folder(BaseUUIDModel, TimeStampedModel, SoftDeleteModel):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="folders")
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, db_index=True)
     slug = models.SlugField(max_length=120, db_index=True)
     description = models.TextField(blank=True)
     cover_asset = models.ForeignKey(
@@ -22,7 +22,11 @@ class Folder(BaseUUIDModel, TimeStampedModel, SoftDeleteModel):
         constraints = [
             models.UniqueConstraint(fields=["owner", "slug"], condition=models.Q(deleted_at__isnull=True), name="uniq_folder_slug_owner_active")
         ]
-        indexes = [models.Index(fields=["owner", "sort_order"]), models.Index(fields=["owner", "slug"])]
+        indexes = [
+            models.Index(fields=["owner", "sort_order"]),
+            models.Index(fields=["owner", "slug"]),
+            models.Index(fields=["owner", "name"]),
+        ]
 
     def __str__(self):
         return self.name

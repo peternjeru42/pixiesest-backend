@@ -30,7 +30,7 @@ class Collection(BaseUUIDModel, TimeStampedModel, SoftDeleteModel):
         "media_assets.MediaAsset", on_delete=models.SET_NULL, null=True, blank=True, related_name="collection_covers"
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft", db_index=True)
-    visibility = models.CharField(max_length=30, choices=VISIBILITY_CHOICES, default="private", db_index=True)
+    visibility = models.CharField(max_length=30, choices=VISIBILITY_CHOICES, default="password_protected", db_index=True)
     sort_order = models.PositiveIntegerField(default=0)
     published_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
