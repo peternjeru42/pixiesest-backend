@@ -55,6 +55,7 @@ class LoginSerializer(TokenObtainPairSerializer):
 
 class GoogleAuthSerializer(serializers.Serializer):
     credential = serializers.CharField()
+    intent = serializers.ChoiceField(choices=["login", "signup"], required=False, default="login")
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):

@@ -80,6 +80,7 @@ class GoogleAuthView(APIView):
 
         google_sub = google_profile.get("sub")
         email = google_profile.get("email", "").strip().lower()
+        intent = serializer.validated_data["intent"]
         if not google_sub or not email:
             raise AuthenticationFailed("Google credential is missing required account details.")
 
@@ -103,6 +104,14 @@ class GoogleAuthView(APIView):
                     raise AuthenticationFailed("This email is already linked to another Google account.")
                 if not user.is_active:
                     raise AuthenticationFailed("User account is disabled.")
+                if intent == "signup" and user.google_sub == google_sub:
+                    return Response(
+                        {
+                            "code": "google_account_exists",
+                            "detail": "This Google account already exists. Please sign in with Google.",
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
 
                 update_fields = ["last_login"]
                 user.last_login = timezone.now()
