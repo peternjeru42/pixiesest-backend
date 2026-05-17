@@ -48,3 +48,27 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email
+
+
+class SignupVerificationCode(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField(db_index=True)
+    code_hash = models.CharField(max_length=255)
+    expires_at = models.DateTimeField(db_index=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["email", "created_at"]),
+            models.Index(fields=["email", "consumed_at", "expires_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.email} signup code"
+
+    @property
+    def is_expired(self):
+        return timezone.now() >= self.expires_at

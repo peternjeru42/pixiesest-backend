@@ -11,6 +11,7 @@ from .models import Folder
 class FolderSerializer(serializers.ModelSerializer):
     cover_url = serializers.SerializerMethodField()
     collections_count = serializers.SerializerMethodField()
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True, min_length=4)
 
     class Meta:
         model = Folder
@@ -24,11 +25,29 @@ class FolderSerializer(serializers.ModelSerializer):
         return obj.collections.count()
 
     def create(self, validated_data):
+        password = validated_data.pop("password", "")
         owner = self.context["request"].user
         folder = Folder(owner=owner, **validated_data)
         folder.slug = unique_slugify(folder, folder.name, queryset=Folder.all_objects.filter(owner=owner))
+        if password:
+            folder.password_hash = make_password(password)
+            folder.is_password_enabled = True
+        elif folder.is_password_enabled:
+            raise serializers.ValidationError({"password": "Password is required when password protection is enabled."})
         folder.save()
         return folder
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop("password", None)
+        enable_password = validated_data.get("is_password_enabled")
+        if password:
+            instance.password_hash = make_password(password)
+            instance.is_password_enabled = True
+        elif enable_password is True and not instance.password_hash:
+            raise serializers.ValidationError({"password": "Password is required when password protection is enabled."})
+        elif enable_password is False:
+            instance.password_hash = ""
+        return super().update(instance, validated_data)
 
 
 class FolderPasswordSerializer(serializers.Serializer):

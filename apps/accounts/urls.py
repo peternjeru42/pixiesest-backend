@@ -11,10 +11,12 @@ from .views import (
     PasswordResetConfirmView,
     PasswordResetRequestView,
     RegisterView,
+    RegisterVerifyView,
 )
 
 urlpatterns = [
     path("register/", RegisterView.as_view(), name="auth-register"),
+    path("register/verify/", RegisterVerifyView.as_view(), name="auth-register-verify"),
     path("login/", LoginView.as_view(), name="auth-login"),
     path("google/", GoogleAuthView.as_view(), name="auth-google"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),

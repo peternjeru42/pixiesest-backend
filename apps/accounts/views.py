@@ -21,7 +21,9 @@ from .serializers import (
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     RegisterSerializer,
+    RegisterVerifySerializer,
     UserSerializer,
+    send_signup_verification_code,
 )
 
 User = get_user_model()
@@ -34,6 +36,20 @@ class RegisterView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {"detail": "Verification code sent. Complete signup within 5 minutes.", "expires_in": 300},
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class RegisterVerifyView(APIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_scope = "auth"
+
+    def post(self, request):
+        serializer = RegisterVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         refresh = RefreshToken.for_user(user)
@@ -202,4 +218,7 @@ class EmailResendVerificationView(APIView):
     def post(self, request):
         serializer = EmailTokenSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        return Response({"detail": "If the email exists, verification instructions will be sent."})
+        email = serializer.validated_data.get("email")
+        if email and not User.objects.filter(email__iexact=email).exists():
+            send_signup_verification_code(email)
+        return Response({"detail": "If signup is pending, a new verification code will be sent.", "expires_in": 300})

@@ -99,3 +99,12 @@ def has_collection_access(request, collection, require_client=False):
             raise GalleryAccessDenied("Client-level access required.")
         return True
     raise GalleryAccessDenied()
+
+
+def has_folder_access(request, folder):
+    if not folder.is_password_enabled:
+        return True
+    session = get_gallery_session(request)
+    if session and session.folder_id == folder.id:
+        return True
+    raise GalleryAccessDenied()

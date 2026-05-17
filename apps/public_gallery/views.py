@@ -1,10 +1,11 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, views
 from rest_framework.response import Response
 
 from apps.collection_sets.models import CollectionSet
 from apps.collections.models import Collection
 from apps.folders.models import Folder
-from apps.gallery_access.services import has_collection_access
+from apps.gallery_access.services import get_gallery_session, has_collection_access, has_folder_access
 from apps.media_assets.models import MediaAsset
 from apps.storage.services import generate_presigned_download_url
 
@@ -20,18 +21,29 @@ class PublicBase:
     permission_classes = [permissions.AllowAny]
 
 
+def _has_client_access(request, collection):
+    session = get_gallery_session(request)
+    return bool(session and session.access_type == "client" and session.collection_id == collection.id)
+
+
 class PublicFolderDetailView(PublicBase, generics.RetrieveAPIView):
     serializer_class = PublicFolderSerializer
     lookup_field = "slug"
     lookup_url_kwarg = "folder_slug"
-    queryset = Folder.objects.filter(show_on_homepage=True)
+    queryset = Folder.objects.all()
+
+    def get_object(self):
+        obj = super().get_object()
+        has_folder_access(self.request, obj)
+        return obj
 
 
 class PublicFolderCollectionsView(PublicBase, generics.ListAPIView):
     serializer_class = PublicCollectionSerializer
 
     def get_queryset(self):
-        folder = Folder.objects.get(slug=self.kwargs["folder_slug"])
+        folder = get_object_or_404(Folder, slug=self.kwargs["folder_slug"])
+        has_folder_access(self.request, folder)
         return Collection.objects.filter(folder=folder, status="published").exclude(visibility="private")
 
 
@@ -55,7 +67,10 @@ class PublicCollectionSetsView(PublicBase, generics.ListAPIView):
     def get_queryset(self):
         collection = Collection.objects.get(slug=self.kwargs["collection_slug"], status="published")
         has_collection_access(self.request, collection)
-        return CollectionSet.objects.filter(collection=collection).exclude(visibility="hidden")
+        queryset = CollectionSet.objects.filter(collection=collection).exclude(visibility="hidden")
+        if not _has_client_access(self.request, collection):
+            queryset = queryset.exclude(visibility="client_only")
+        return queryset
 
 
 class PublicCollectionMediaView(PublicBase, generics.ListAPIView):
@@ -64,7 +79,10 @@ class PublicCollectionMediaView(PublicBase, generics.ListAPIView):
     def get_queryset(self):
         collection = Collection.objects.get(slug=self.kwargs["collection_slug"], status="published")
         has_collection_access(self.request, collection)
-        return MediaAsset.objects.filter(collection=collection, status="ready", is_private=False).select_related("collection", "set")
+        queryset = MediaAsset.objects.filter(collection=collection, status="ready", is_private=False).exclude(set__visibility="hidden")
+        if not _has_client_access(self.request, collection):
+            queryset = queryset.exclude(set__visibility="client_only")
+        return queryset.select_related("collection", "set")
 
 
 class PublicSetDetailView(PublicBase, generics.RetrieveAPIView):
@@ -91,7 +109,7 @@ class PublicSetMediaView(PublicBase, generics.ListAPIView):
 class PublicMediaDetailView(PublicBase, generics.RetrieveAPIView):
     serializer_class = PublicMediaAssetSerializer
     lookup_url_kwarg = "media_id"
-    queryset = MediaAsset.objects.filter(status="ready").select_related("collection", "set")
+    queryset = MediaAsset.objects.filter(status="ready", is_private=False).exclude(set__visibility="hidden").select_related("collection", "set")
 
     def get_object(self):
         obj = super().get_object()
@@ -103,7 +121,7 @@ class PublicMediaSignedUrlView(PublicBase, views.APIView):
     key_name = "preview_file_key"
 
     def get(self, request, media_id):
-        asset = MediaAsset.objects.select_related("collection", "set").get(id=media_id, status="ready")
+        asset = MediaAsset.objects.exclude(set__visibility="hidden").select_related("collection", "set").get(id=media_id, status="ready", is_private=False)
         has_collection_access(request, asset.collection, require_client=asset.set.visibility == "client_only")
         key = getattr(asset, self.key_name)
         return Response({"url": generate_presigned_download_url(key, asset.display_filename) if key else None})
