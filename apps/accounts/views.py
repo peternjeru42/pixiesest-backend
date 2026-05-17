@@ -170,6 +170,7 @@ class PasswordResetRequestView(APIView):
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response({"detail": "If the email exists, reset instructions will be sent."})
 
 
@@ -180,7 +181,8 @@ class PasswordResetConfirmView(APIView):
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        return Response({"detail": "Password reset token accepted by placeholder implementation."})
+        serializer.save()
+        return Response({"detail": "Password has been reset."})
 
 
 class EmailVerifyView(APIView):

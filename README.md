@@ -65,6 +65,23 @@ celery -A config worker -l info
 
 Owner/admin endpoints require JWT bearer auth. Public gallery endpoints use signed gallery session tokens via `X-Gallery-Session` where collection visibility requires it.
 
+## Email With Resend
+
+The backend uses Django's normal email settings, so Resend is configured as the SMTP provider. Create a Resend API key, verify the sending domain, then set:
+
+```bash
+FRONTEND_URL=https://your-frontend-domain.com
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.resend.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=resend
+RESEND_API_KEY=re_xxxxxxxxx
+EMAIL_USE_TLS=True
+DEFAULT_FROM_EMAIL="Droptop <no-reply@yourdomain.com>"
+```
+
+`EMAIL_HOST_PASSWORD` is also supported, but `RESEND_API_KEY` is preferred for clarity. Local development defaults to Django's console email backend unless `EMAIL_BACKEND` is explicitly set.
+
 ## Railway
 
 Set the environment variables from `.env.example` in Railway. The default Railway start command runs migrations then starts Gunicorn:
