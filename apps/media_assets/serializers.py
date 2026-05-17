@@ -1,9 +1,14 @@
 from rest_framework import serializers
 
+from apps.storage.services import get_public_object_url
+
 from .models import MediaAsset, MediaAssetMetadata
 
 
 class MediaAssetSerializer(serializers.ModelSerializer):
+    preview_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+
     class Meta:
         model = MediaAsset
         fields = "__all__"
@@ -26,12 +31,27 @@ class MediaAssetSerializer(serializers.ModelSerializer):
             "deleted_at",
         ]
 
+    def get_preview_url(self, obj):
+        return get_public_object_url(obj.preview_file_key)
+
+    def get_thumbnail_url(self, obj):
+        return get_public_object_url(obj.thumbnail_file_key)
+
 
 class MediaAssetPublicSerializer(serializers.ModelSerializer):
+    preview_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+
     class Meta:
         model = MediaAsset
         exclude = ["original_file_key", "checksum", "deleted_at", "owner"]
         read_only_fields = [field.name for field in MediaAsset._meta.fields if field.name != "deleted_at"]
+
+    def get_preview_url(self, obj):
+        return get_public_object_url(obj.preview_file_key)
+
+    def get_thumbnail_url(self, obj):
+        return get_public_object_url(obj.thumbnail_file_key)
 
 
 class MediaAssetMetadataSerializer(serializers.ModelSerializer):

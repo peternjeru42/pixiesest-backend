@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Count, Sum
 from django.utils import timezone
@@ -13,12 +12,7 @@ from apps.favorites.models import FavoriteList
 from apps.folders.models import Folder
 from apps.media_assets.models import MediaAsset
 from apps.quotas.models import StorageQuota
-
-
-def _asset_url(key):
-    if not key or not settings.CLOUDFLARE_R2_PUBLIC_BASE_URL:
-        return ""
-    return f"{settings.CLOUDFLARE_R2_PUBLIC_BASE_URL.rstrip('/')}/{key.lstrip('/')}"
+from apps.storage.services import get_public_object_url
 
 
 def _display_name(user):
@@ -50,7 +44,7 @@ def _collection_payload(collection):
         "slug": collection.slug,
         "title": collection.title,
         "status": collection.status,
-        "cover_url": _asset_url(getattr(cover_asset, "thumbnail_file_key", "")),
+        "cover_url": get_public_object_url(getattr(cover_asset, "thumbnail_file_key", "")),
         "counts": {
             "photos": media.filter(media_type="photo").count(),
             "videos": media.filter(media_type="video").count(),
@@ -114,7 +108,7 @@ class DashboardOverviewView(views.APIView):
                         "filename": asset.display_filename,
                         "media_type": asset.media_type,
                         "status": asset.status,
-                        "thumbnail_url": _asset_url(asset.thumbnail_file_key),
+                        "thumbnail_url": get_public_object_url(asset.thumbnail_file_key),
                         "created_at": asset.created_at,
                     }
                     for asset in media.order_by("-created_at")[:8]

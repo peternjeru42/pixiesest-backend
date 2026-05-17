@@ -32,6 +32,12 @@ def generate_presigned_download_url(key, filename=None, expires_in=None):
     )
 
 
+def get_public_object_url(key):
+    if not key or not settings.CLOUDFLARE_R2_PUBLIC_BASE_URL:
+        return ""
+    return f"{settings.CLOUDFLARE_R2_PUBLIC_BASE_URL.rstrip('/')}/{key.lstrip('/')}"
+
+
 def object_exists(key):
     try:
         get_r2_client().head_object(Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME, Key=key)

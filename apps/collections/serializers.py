@@ -1,15 +1,20 @@
 from django.contrib.auth.hashers import make_password
 from rest_framework import serializers
 
+from apps.collection_sets.serializers import CollectionSetSerializer
 from apps.core.utils import unique_slugify
 from apps.folders.models import Folder
 from apps.media_assets.models import MediaAsset
+from apps.storage.services import get_public_object_url
 
 from .models import Collection, CollectionDesignSettings, CollectionDownloadSettings, CollectionPrivacySettings
 
 
 class CollectionSerializer(serializers.ModelSerializer):
     download_pin = serializers.CharField(source="download_settings.download_pin", read_only=True)
+    cover_url = serializers.SerializerMethodField()
+    counts = serializers.SerializerMethodField()
+    sets = serializers.SerializerMethodField()
     folder_id = serializers.PrimaryKeyRelatedField(
         source="folder",
         queryset=Folder.objects.all(),
@@ -41,6 +46,29 @@ class CollectionSerializer(serializers.ModelSerializer):
 
     def validate_folder_id(self, folder):
         return self.validate_folder(folder)
+
+    def get_cover_url(self, obj):
+        cover_asset = obj.cover_asset or obj.media_assets.order_by("-created_at").first()
+        return get_public_object_url(getattr(cover_asset, "thumbnail_file_key", ""))
+
+    def get_counts(self, obj):
+        from apps.activity.models import ActivityEvent
+        from apps.downloads.models import DownloadLog
+        from apps.favorites.models import FavoriteList
+
+        media = obj.media_assets
+        return {
+            "photos": media.filter(media_type="photo").count(),
+            "videos": media.filter(media_type="video").count(),
+            "videoDurationSec": 0,
+            "favorites": FavoriteList.objects.filter(collection=obj).count(),
+            "downloads": DownloadLog.objects.filter(collection=obj).count(),
+            "views": ActivityEvent.objects.filter(collection=obj, event_type__icontains="view").count(),
+            "sets": obj.sets.count(),
+        }
+
+    def get_sets(self, obj):
+        return CollectionSetSerializer(obj.sets.all(), many=True).data
 
     def create(self, validated_data):
         owner = self.context["request"].user

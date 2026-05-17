@@ -3,15 +3,25 @@ from rest_framework import serializers
 
 from apps.core.utils import unique_slugify
 from apps.media_assets.models import MediaAsset
+from apps.storage.services import get_public_object_url
 
 from .models import Folder
 
 
 class FolderSerializer(serializers.ModelSerializer):
+    cover_url = serializers.SerializerMethodField()
+    collections_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Folder
         exclude = ["password_hash"]
         read_only_fields = ["id", "owner", "slug", "created_at", "updated_at", "deleted_at"]
+
+    def get_cover_url(self, obj):
+        return get_public_object_url(getattr(obj.cover_asset, "thumbnail_file_key", ""))
+
+    def get_collections_count(self, obj):
+        return obj.collections.count()
 
     def create(self, validated_data):
         owner = self.context["request"].user
