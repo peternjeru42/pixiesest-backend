@@ -11,6 +11,7 @@ from apps.downloads.models import DownloadLog
 from apps.favorites.models import FavoriteList
 from apps.folders.models import Folder
 from apps.media_assets.models import MediaAsset
+from apps.media_assets.storage import refresh_missing_derived_storage_sizes, storage_totals_for_queryset
 from apps.quotas.models import StorageQuota
 from apps.storage.services import get_public_object_url
 
@@ -79,7 +80,10 @@ class DashboardOverviewView(views.APIView):
         quota = StorageQuota.objects.filter(user=user, is_active=True).first()
         latest_collection = collections.order_by("-created_at").first()
 
-        total_storage_bytes = media.aggregate(total=Sum("file_size_bytes")).get("total") or 0
+        billable_media = media.exclude(status="deleted")
+        refresh_missing_derived_storage_sizes(billable_media)
+        storage_totals = storage_totals_for_queryset(billable_media)
+        total_storage_bytes = storage_totals["total"]
         total_video_duration_seconds = media.filter(media_type="video").aggregate(total=Sum("duration_seconds")).get("total") or 0
         display_name = _display_name(user)
 
@@ -167,11 +171,17 @@ class CollectionsSummaryView(views.APIView):
 class MediaSummaryView(views.APIView):
     def get(self, request):
         qs = MediaAsset.objects.filter(owner=request.user)
+        billable_media = qs.exclude(status="deleted")
+        refresh_missing_derived_storage_sizes(billable_media)
+        storage_totals = storage_totals_for_queryset(billable_media)
         return Response(
             {
                 "photos": qs.filter(media_type="photo").count(),
                 "videos": qs.filter(media_type="video").count(),
-                "total_storage_bytes": qs.aggregate(total=Sum("file_size_bytes")).get("total") or 0,
+                "total_storage_bytes": storage_totals["total"],
+                "total_original_storage_bytes": storage_totals["original"],
+                "total_preview_storage_bytes": storage_totals["preview"],
+                "total_thumbnail_storage_bytes": storage_totals["thumbnail"],
             }
         )
 

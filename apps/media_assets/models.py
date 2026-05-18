@@ -33,6 +33,8 @@ class MediaAsset(BaseUUIDModel, TimeStampedModel, SoftDeleteModel):
     mime_type = models.CharField(max_length=120)
     extension = models.CharField(max_length=20)
     file_size_bytes = models.PositiveBigIntegerField()
+    preview_file_size_bytes = models.PositiveBigIntegerField(default=0)
+    thumbnail_file_size_bytes = models.PositiveBigIntegerField(default=0)
     original_width = models.PositiveIntegerField(null=True, blank=True)
     original_height = models.PositiveIntegerField(null=True, blank=True)
     duration_seconds = models.PositiveIntegerField(null=True, blank=True)

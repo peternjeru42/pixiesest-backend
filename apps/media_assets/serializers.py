@@ -23,6 +23,8 @@ class MediaAssetSerializer(serializers.ModelSerializer):
             "mime_type",
             "extension",
             "file_size_bytes",
+            "preview_file_size_bytes",
+            "thumbnail_file_size_bytes",
             "checksum",
             "uploaded_at",
             "processed_at",

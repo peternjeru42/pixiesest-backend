@@ -8,7 +8,7 @@ from PIL import Image, ExifTags, ImageOps
 
 from apps.media_assets.models import MediaAsset, MediaAssetMetadata
 from apps.profiles.services import recalculate_user_profile_stats
-from apps.quotas.services import increase_storage_usage
+from apps.quotas.services import recalculate_storage_usage
 from apps.storage.services import build_preview_key, build_thumbnail_key, download_bytes, upload_bytes
 
 from .models import MediaProcessingJob
@@ -73,7 +73,7 @@ def _finish_asset_if_processing_complete(media_asset_id):
         asset.processed_at = timezone.now()
         asset.save(update_fields=["status", "processed_at", "updated_at"])
         _update_upload_session(asset, "completed")
-        increase_storage_usage(asset.owner, asset.file_size_bytes, "original_upload", media_asset=asset)
+        recalculate_storage_usage(asset.owner)
         recalculate_user_profile_stats(asset.owner)
 
 
@@ -108,7 +108,9 @@ def _save_webp_variant(image, size, quality, key):
     variant.thumbnail(size)
     out = io.BytesIO()
     variant.convert("RGB").save(out, format="WEBP", quality=quality)
-    upload_bytes(key, out.getvalue(), "image/webp")
+    body = out.getvalue()
+    upload_bytes(key, body, "image/webp")
+    return len(body)
 
 
 @shared_task
@@ -135,15 +137,15 @@ def process_photo_media(media_asset_id):
         _complete(jobs["photo_metadata"])
 
         preview_key = build_preview_key(asset.owner_id, asset.collection_id, asset.id)
-        _save_webp_variant(image, (2400, 2400), 86, preview_key)
         asset.preview_file_key = preview_key
-        asset.save(update_fields=["preview_file_key", "updated_at"])
+        asset.preview_file_size_bytes = _save_webp_variant(image, (2400, 2400), 86, preview_key)
+        asset.save(update_fields=["preview_file_key", "preview_file_size_bytes", "updated_at"])
         _complete(jobs["photo_preview"])
 
         thumbnail_key = build_thumbnail_key(asset.owner_id, asset.collection_id, asset.id)
-        _save_webp_variant(image, (600, 600), 80, thumbnail_key)
         asset.thumbnail_file_key = thumbnail_key
-        asset.save(update_fields=["thumbnail_file_key", "updated_at"])
+        asset.thumbnail_file_size_bytes = _save_webp_variant(image, (600, 600), 80, thumbnail_key)
+        asset.save(update_fields=["thumbnail_file_key", "thumbnail_file_size_bytes", "updated_at"])
         _complete(jobs["photo_thumbnail"])
 
         _finish_asset_if_processing_complete(asset.id)
@@ -163,12 +165,14 @@ def generate_photo_preview(media_asset_id):
         image.thumbnail((2400, 2400))
         out = io.BytesIO()
         image.convert("RGB").save(out, format="WEBP", quality=86)
+        body = out.getvalue()
         key = build_preview_key(asset.owner_id, asset.collection_id, asset.id)
-        upload_bytes(key, out.getvalue(), "image/webp")
+        upload_bytes(key, body, "image/webp")
         asset.preview_file_key = key
+        asset.preview_file_size_bytes = len(body)
         asset.original_width = asset.original_width or image.width
         asset.original_height = asset.original_height or image.height
-        asset.save(update_fields=["preview_file_key", "original_width", "original_height", "updated_at"])
+        asset.save(update_fields=["preview_file_key", "preview_file_size_bytes", "original_width", "original_height", "updated_at"])
         _complete(job)
         _finish_asset_if_processing_complete(asset.id)
     except Exception as exc:
@@ -185,10 +189,12 @@ def generate_photo_thumbnail(media_asset_id):
         image.thumbnail((600, 600))
         out = io.BytesIO()
         image.convert("RGB").save(out, format="WEBP", quality=80)
+        body = out.getvalue()
         key = build_thumbnail_key(asset.owner_id, asset.collection_id, asset.id)
-        upload_bytes(key, out.getvalue(), "image/webp")
+        upload_bytes(key, body, "image/webp")
         asset.thumbnail_file_key = key
-        asset.save(update_fields=["thumbnail_file_key", "updated_at"])
+        asset.thumbnail_file_size_bytes = len(body)
+        asset.save(update_fields=["thumbnail_file_key", "thumbnail_file_size_bytes", "updated_at"])
         _complete(job)
         _finish_asset_if_processing_complete(asset.id)
     except Exception as exc:
