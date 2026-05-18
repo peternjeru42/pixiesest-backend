@@ -1,6 +1,16 @@
+from pathlib import Path
+
 import boto3
 from botocore.config import Config
 from django.conf import settings
+
+
+def using_local_storage():
+    return settings.STORAGE_BACKEND == "local"
+
+
+def _local_path(key):
+    return Path(settings.MEDIA_ROOT) / key.lstrip("/")
 
 
 def get_r2_client():
@@ -15,6 +25,8 @@ def get_r2_client():
 
 
 def generate_presigned_upload_url(key, content_type, expires_in=None):
+    if using_local_storage():
+        raise RuntimeError("Presigned uploads require the R2 storage backend.")
     client = get_r2_client()
     return client.generate_presigned_url(
         "put_object",
@@ -24,6 +36,8 @@ def generate_presigned_upload_url(key, content_type, expires_in=None):
 
 
 def generate_presigned_download_url(key, filename=None, expires_in=None):
+    if using_local_storage():
+        return get_public_object_url(key)
     params = {"Bucket": settings.CLOUDFLARE_R2_BUCKET_NAME, "Key": key}
     if filename:
         params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
@@ -34,11 +48,15 @@ def generate_presigned_download_url(key, filename=None, expires_in=None):
 
 def get_public_object_url(key):
     if not key or not settings.CLOUDFLARE_R2_PUBLIC_BASE_URL:
-        return ""
+        if not key or not using_local_storage():
+            return ""
+        return f"{settings.LOCAL_MEDIA_PUBLIC_BASE_URL.rstrip('/')}/{key.lstrip('/')}"
     return f"{settings.CLOUDFLARE_R2_PUBLIC_BASE_URL.rstrip('/')}/{key.lstrip('/')}"
 
 
 def object_exists(key):
+    if using_local_storage():
+        return _local_path(key).exists()
     try:
         get_r2_client().head_object(Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME, Key=key)
         return True
@@ -47,10 +65,21 @@ def object_exists(key):
 
 
 def delete_object(key):
+    if using_local_storage():
+        path = _local_path(key)
+        if path.exists():
+            path.unlink()
+        return None
     return get_r2_client().delete_object(Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME, Key=key)
 
 
 def copy_object(source_key, destination_key):
+    if using_local_storage():
+        source = _local_path(source_key)
+        destination = _local_path(destination_key)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source.read_bytes())
+        return None
     return get_r2_client().copy_object(
         Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME,
         Key=destination_key,
@@ -59,16 +88,26 @@ def copy_object(source_key, destination_key):
 
 
 def get_object_metadata(key):
+    if using_local_storage():
+        path = _local_path(key)
+        return {"ContentLength": path.stat().st_size}
     return get_r2_client().head_object(Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME, Key=key)
 
 
 def upload_bytes(key, body, content_type):
+    if using_local_storage():
+        path = _local_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+        return None
     return get_r2_client().put_object(
         Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME, Key=key, Body=body, ContentType=content_type
     )
 
 
 def download_bytes(key):
+    if using_local_storage():
+        return _local_path(key).read_bytes()
     obj = get_r2_client().get_object(Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME, Key=key)
     return obj["Body"].read()
 

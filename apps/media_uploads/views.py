@@ -1,5 +1,11 @@
-from rest_framework import generics, status, views
+from django.http import Http404
+from django.shortcuts import get_object_or_404
+from django.urls import reverse
+from django.utils import timezone
+from rest_framework import generics, permissions, status, views
 from rest_framework.response import Response
+
+from apps.storage.services import generate_presigned_upload_url, upload_bytes, using_local_storage
 
 from .models import MediaUploadSession
 from .serializers import (
@@ -13,19 +19,52 @@ from .serializers import (
 from .services import complete_upload, create_upload_session
 
 
+def upload_url_for_request(request, session):
+    if using_local_storage():
+        return request.build_absolute_uri(reverse("upload-file", kwargs={"upload_id": session.upload_id}))
+    return generate_presigned_upload_url(session.r2_object_key, session.mime_type)
+
+
 class PresignUploadView(views.APIView):
     def post(self, request):
         serializer = PresignUploadSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        session, url = create_upload_session(request.user, **serializer.validated_data)
-        return Response({"upload": UploadSessionSerializer(session).data, "upload_url": url}, status=status.HTTP_201_CREATED)
+        session = create_upload_session(request.user, **serializer.validated_data)
+        return Response(
+            {"upload": UploadSessionSerializer(session).data, "upload_url": upload_url_for_request(request, session)},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class LocalUploadFileView(views.APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def put(self, request, upload_id):
+        if not using_local_storage():
+            raise Http404
+
+        session = get_object_or_404(MediaUploadSession.objects.select_related("media_asset"), upload_id=upload_id)
+        if session.expires_at <= timezone.now() or session.status in {"cancelled", "expired"}:
+            return Response({"detail": "Upload session is no longer active."}, status=status.HTTP_400_BAD_REQUEST)
+
+        body = request.body
+        if len(body) != session.file_size_bytes:
+            return Response({"detail": "Uploaded file size does not match the upload session."}, status=status.HTTP_400_BAD_REQUEST)
+
+        upload_bytes(session.r2_object_key, body, session.mime_type)
+        session.status = "uploaded"
+        session.save(update_fields=["status", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CompleteUploadView(views.APIView):
     def post(self, request):
         serializer = CompleteUploadSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        session = complete_upload(request.user, **serializer.validated_data)
+        try:
+            session = complete_upload(request.user, **serializer.validated_data)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(UploadSessionSerializer(session).data)
 
 
@@ -56,8 +95,8 @@ class BulkPresignUploadView(views.APIView):
         serializer.is_valid(raise_exception=True)
         results = []
         for item in serializer.validated_data["files"]:
-            session, url = create_upload_session(request.user, **item)
-            results.append({"upload": UploadSessionSerializer(session).data, "upload_url": url})
+            session = create_upload_session(request.user, **item)
+            results.append({"upload": UploadSessionSerializer(session).data, "upload_url": upload_url_for_request(request, session)})
         return Response({"uploads": results}, status=status.HTTP_201_CREATED)
 
 
@@ -65,5 +104,8 @@ class BulkCompleteUploadView(views.APIView):
     def post(self, request):
         serializer = BulkCompleteUploadSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        sessions = [complete_upload(request.user, **item) for item in serializer.validated_data["uploads"]]
+        try:
+            sessions = [complete_upload(request.user, **item) for item in serializer.validated_data["uploads"]]
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"uploads": UploadSessionSerializer(sessions, many=True).data})

@@ -9,7 +9,7 @@ from apps.collections.models import Collection
 from apps.core.utils import extension_from_filename, safe_filename
 from apps.media_assets.models import MediaAsset
 from apps.quotas.services import check_user_has_storage_space
-from apps.storage.services import build_original_key, generate_presigned_upload_url, object_exists
+from apps.storage.services import build_original_key, object_exists
 
 from .models import MediaUploadSession
 
@@ -57,7 +57,7 @@ def create_upload_session(user, *, collection_id, set_id, original_filename, mim
         status="pending",
         expires_at=timezone.now() + timedelta(hours=2),
     )
-    return session, generate_presigned_upload_url(key, mime_type)
+    return session
 
 
 @transaction.atomic
