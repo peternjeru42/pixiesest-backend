@@ -3,6 +3,7 @@ from rest_framework import decorators, generics, response, viewsets
 
 from apps.collection_sets.models import CollectionSet
 from apps.collections.models import Collection
+from apps.storage.services import generate_presigned_download_url
 
 from .models import MediaAsset, MediaAssetMetadata
 from .serializers import (
@@ -71,6 +72,16 @@ class MediaAssetViewSet(viewsets.ModelViewSet):
         asset.is_downloadable = bool(request.data.get("is_downloadable", asset.is_downloadable))
         asset.save(update_fields=["is_downloadable", "updated_at"])
         return response.Response(MediaAssetSerializer(asset).data)
+
+    @decorators.action(detail=True, methods=["get"], url_path="download-url")
+    def download_url(self, request, media_id=None):
+        asset = self.get_object()
+        return response.Response(
+            {
+                "url": generate_presigned_download_url(asset.original_file_key, asset.original_filename),
+                "filename": asset.original_filename,
+            }
+        )
 
     @decorators.action(detail=True, methods=["get", "patch"])
     def metadata(self, request, media_id=None):
