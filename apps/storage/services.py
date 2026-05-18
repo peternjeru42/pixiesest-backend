@@ -47,10 +47,12 @@ def generate_presigned_download_url(key, filename=None, expires_in=None):
 
 
 def get_public_object_url(key):
-    if not key or not settings.CLOUDFLARE_R2_PUBLIC_BASE_URL:
-        if not key or not using_local_storage():
-            return ""
-        return f"{settings.LOCAL_MEDIA_PUBLIC_BASE_URL.rstrip('/')}/{key.lstrip('/')}"
+    if not key:
+        return ""
+    if not settings.CLOUDFLARE_R2_PUBLIC_BASE_URL:
+        if using_local_storage():
+            return f"{settings.LOCAL_MEDIA_PUBLIC_BASE_URL.rstrip('/')}/{key.lstrip('/')}"
+        return generate_presigned_download_url(key)
     return f"{settings.CLOUDFLARE_R2_PUBLIC_BASE_URL.rstrip('/')}/{key.lstrip('/')}"
 
 
