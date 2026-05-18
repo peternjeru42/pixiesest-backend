@@ -4,7 +4,7 @@ import logging
 from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
-from PIL import Image, ExifTags
+from PIL import Image, ExifTags, ImageOps
 
 from apps.media_assets.models import MediaAsset, MediaAssetMetadata
 from apps.profiles.services import recalculate_user_profile_stats
@@ -86,9 +86,7 @@ def process_uploaded_media(media_asset_id):
         asset.save(update_fields=["status", "processed_at", "updated_at"])
         MediaProcessingJob.objects.filter(media_asset=asset, job_type__in=_required_job_types(asset)).delete()
         if asset.media_type in {"photo", "gif"}:
-            generate_photo_preview.delay(str(asset.id))
-            generate_photo_thumbnail.delay(str(asset.id))
-            extract_photo_metadata.delay(str(asset.id))
+            process_photo_media.delay(str(asset.id))
         else:
             extract_video_metadata.delay(str(asset.id))
             generate_video_thumbnail.delay(str(asset.id))
@@ -103,6 +101,57 @@ def _update_upload_session(asset, status):
     from apps.media_uploads.models import MediaUploadSession
 
     MediaUploadSession.objects.filter(media_asset=asset).update(status=status, updated_at=timezone.now())
+
+
+def _save_webp_variant(image, size, quality, key):
+    variant = image.copy()
+    variant.thumbnail(size)
+    out = io.BytesIO()
+    variant.convert("RGB").save(out, format="WEBP", quality=quality)
+    upload_bytes(key, out.getvalue(), "image/webp")
+
+
+@shared_task
+def process_photo_media(media_asset_id):
+    asset = MediaAsset.objects.select_related("owner", "collection").get(id=media_asset_id)
+    jobs = {
+        "photo_preview": _job(asset, "photo_preview"),
+        "photo_thumbnail": _job(asset, "photo_thumbnail"),
+        "photo_metadata": _job(asset, "photo_metadata"),
+    }
+    try:
+        image = Image.open(io.BytesIO(download_bytes(asset.original_file_key)))
+        image = ImageOps.exif_transpose(image)
+        original_width, original_height = image.size
+
+        exif = image.getexif()
+        decoded = {}
+        for key, value in exif.items():
+            decoded[ExifTags.TAGS.get(key, key)] = str(value)
+        MediaAssetMetadata.objects.update_or_create(media_asset=asset, defaults={"extra_metadata": decoded})
+        asset.original_width = original_width
+        asset.original_height = original_height
+        asset.save(update_fields=["original_width", "original_height", "updated_at"])
+        _complete(jobs["photo_metadata"])
+
+        preview_key = build_preview_key(asset.owner_id, asset.collection_id, asset.id)
+        _save_webp_variant(image, (2400, 2400), 86, preview_key)
+        asset.preview_file_key = preview_key
+        asset.save(update_fields=["preview_file_key", "updated_at"])
+        _complete(jobs["photo_preview"])
+
+        thumbnail_key = build_thumbnail_key(asset.owner_id, asset.collection_id, asset.id)
+        _save_webp_variant(image, (600, 600), 80, thumbnail_key)
+        asset.thumbnail_file_key = thumbnail_key
+        asset.save(update_fields=["thumbnail_file_key", "updated_at"])
+        _complete(jobs["photo_thumbnail"])
+
+        _finish_asset_if_processing_complete(asset.id)
+    except Exception as exc:
+        for job in jobs.values():
+            if job.status != "completed":
+                _fail(job, exc)
+        raise
 
 
 @shared_task
