@@ -1,4 +1,5 @@
 import io
+import logging
 
 from celery import shared_task
 from django.utils import timezone
@@ -10,6 +11,8 @@ from apps.quotas.services import increase_storage_usage
 from apps.storage.services import build_preview_key, build_thumbnail_key, download_bytes, upload_bytes
 
 from .models import MediaProcessingJob
+
+logger = logging.getLogger(__name__)
 
 
 def _job(asset, job_type):
@@ -35,21 +38,35 @@ def _fail(job, exc):
 @shared_task
 def process_uploaded_media(media_asset_id):
     asset = MediaAsset.objects.select_related("owner", "collection", "set").get(id=media_asset_id)
-    asset.status = "processing"
-    asset.save(update_fields=["status", "updated_at"])
-    if asset.media_type in {"photo", "gif"}:
-        generate_photo_preview(str(asset.id))
-        generate_photo_thumbnail(str(asset.id))
-        extract_photo_metadata(str(asset.id))
-    else:
-        extract_video_metadata(str(asset.id))
-        generate_video_thumbnail(str(asset.id))
-    asset.status = "ready"
-    asset.processed_at = timezone.now()
-    asset.save(update_fields=["status", "processed_at", "updated_at"])
-    increase_storage_usage(asset.owner, asset.file_size_bytes, "original_upload", media_asset=asset)
-    recalculate_user_profile_stats(asset.owner)
-    return str(asset.id)
+    try:
+        asset.status = "processing"
+        asset.save(update_fields=["status", "updated_at"])
+        if asset.media_type in {"photo", "gif"}:
+            generate_photo_preview(str(asset.id))
+            generate_photo_thumbnail(str(asset.id))
+            extract_photo_metadata(str(asset.id))
+        else:
+            extract_video_metadata(str(asset.id))
+            generate_video_thumbnail(str(asset.id))
+        asset.status = "ready"
+        asset.processed_at = timezone.now()
+        asset.save(update_fields=["status", "processed_at", "updated_at"])
+        _update_upload_session(asset, "completed")
+        increase_storage_usage(asset.owner, asset.file_size_bytes, "original_upload", media_asset=asset)
+        recalculate_user_profile_stats(asset.owner)
+        return str(asset.id)
+    except Exception:
+        logger.exception("Media processing failed.", extra={"media_asset_id": str(asset.id)})
+        asset.status = "failed"
+        asset.save(update_fields=["status", "updated_at"])
+        _update_upload_session(asset, "failed")
+        raise
+
+
+def _update_upload_session(asset, status):
+    from apps.media_uploads.models import MediaUploadSession
+
+    MediaUploadSession.objects.filter(media_asset=asset).update(status=status, updated_at=timezone.now())
 
 
 @shared_task

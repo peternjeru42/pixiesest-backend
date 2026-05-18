@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import timedelta
 
@@ -12,6 +13,8 @@ from apps.quotas.services import check_user_has_storage_space
 from apps.storage.services import build_original_key, object_exists
 
 from .models import MediaUploadSession
+
+logger = logging.getLogger(__name__)
 
 
 def infer_media_type(mime_type):
@@ -74,7 +77,19 @@ def complete_upload(user, upload_id, checksum=""):
     asset.save(update_fields=["status", "uploaded_at", "checksum", "updated_at"])
     session.status = "processing"
     session.save(update_fields=["status", "updated_at"])
+
+    transaction.on_commit(lambda: queue_media_processing(asset.id))
+    return session
+
+
+def queue_media_processing(asset_id):
     from apps.media_processing.tasks import process_uploaded_media
 
-    process_uploaded_media.delay(str(asset.id))
-    return session
+    try:
+        process_uploaded_media.delay(str(asset_id))
+    except Exception:
+        logger.exception("Unable to enqueue media processing; processing inline.", extra={"media_asset_id": str(asset_id)})
+        try:
+            process_uploaded_media(str(asset_id))
+        except Exception:
+            logger.exception("Inline media processing failed.", extra={"media_asset_id": str(asset_id)})

@@ -1,3 +1,5 @@
+import logging
+
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -17,6 +19,8 @@ from .serializers import (
     UploadSessionSerializer,
 )
 from .services import complete_upload, create_upload_session
+
+logger = logging.getLogger(__name__)
 
 
 def upload_url_for_request(request, session):
@@ -61,10 +65,17 @@ class CompleteUploadView(views.APIView):
     def post(self, request):
         serializer = CompleteUploadSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        upload_id = serializer.validated_data["upload_id"]
         try:
             session = complete_upload(request.user, **serializer.validated_data)
+        except MediaUploadSession.DoesNotExist:
+            logger.warning("Upload completion requested for missing session.", extra={"upload_id": upload_id, "user_id": str(request.user.id)})
+            return Response({"detail": "Upload session was not found."}, status=status.HTTP_404_NOT_FOUND)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Upload completion failed.", extra={"upload_id": upload_id, "user_id": str(request.user.id)})
+            return Response({"detail": "Unable to complete upload. Check backend logs for upload completion failure."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(UploadSessionSerializer(session).data)
 
 
@@ -106,6 +117,12 @@ class BulkCompleteUploadView(views.APIView):
         serializer.is_valid(raise_exception=True)
         try:
             sessions = [complete_upload(request.user, **item) for item in serializer.validated_data["uploads"]]
+        except MediaUploadSession.DoesNotExist:
+            logger.warning("Bulk upload completion requested for missing session.", extra={"user_id": str(request.user.id)})
+            return Response({"detail": "One or more upload sessions were not found."}, status=status.HTTP_404_NOT_FOUND)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Bulk upload completion failed.", extra={"user_id": str(request.user.id)})
+            return Response({"detail": "Unable to complete uploads. Check backend logs for upload completion failure."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response({"uploads": UploadSessionSerializer(sessions, many=True).data})

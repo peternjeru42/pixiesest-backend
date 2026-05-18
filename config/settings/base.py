@@ -225,6 +225,27 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "Droptop <no-reply@example.com>")
 
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", "")
 
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": env("LOG_LEVEL", "INFO"),
+    },
+    "loggers": {
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+    },
+}
+
 MAX_UPLOAD_FILE_SIZE_BYTES = int(env("MAX_UPLOAD_FILE_SIZE_BYTES", str(5 * 1024**3)))
 ALLOWED_UPLOAD_MIME_TYPES = env_list(
     "ALLOWED_UPLOAD_MIME_TYPES",

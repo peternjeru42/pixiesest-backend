@@ -56,6 +56,14 @@ def _collection_payload(collection):
     }
 
 
+def _asset_image_url(asset):
+    return (
+        get_public_object_url(asset.thumbnail_file_key)
+        or get_public_object_url(asset.preview_file_key)
+        or get_public_object_url(asset.original_file_key)
+    )
+
+
 class DashboardOverviewView(views.APIView):
     def get(self, request):
         user = request.user
@@ -65,6 +73,7 @@ class DashboardOverviewView(views.APIView):
 
         collections = Collection.objects.filter(owner=user)
         media = MediaAsset.objects.filter(owner=user)
+        recent_media = media.exclude(status__in=["failed", "deleted"])
         downloads = DownloadLog.objects.filter(collection__owner=user)
         favorites = FavoriteList.objects.filter(collection__owner=user)
         views = ActivityEvent.objects.filter(owner=user, event_type__icontains="view")
@@ -108,10 +117,10 @@ class DashboardOverviewView(views.APIView):
                         "filename": asset.display_filename,
                         "media_type": asset.media_type,
                         "status": asset.status,
-                        "thumbnail_url": get_public_object_url(asset.thumbnail_file_key),
+                        "thumbnail_url": _asset_image_url(asset),
                         "created_at": asset.created_at,
                     }
-                    for asset in media.order_by("-created_at")[:8]
+                    for asset in recent_media.order_by("-created_at")[:8]
                 ],
                 "latest_collection": _collection_payload(latest_collection) if latest_collection else None,
             }
