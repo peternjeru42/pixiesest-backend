@@ -34,8 +34,12 @@ class EmailLog(BaseUUIDModel):
     provider_message_id = models.CharField(max_length=255, blank=True)
     error_message = models.TextField(blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
+    read_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["owner", "-created_at"])]
+        indexes = [
+            models.Index(fields=["owner", "-created_at"]),
+            models.Index(fields=["owner", "status", "read_at"]),
+        ]

@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import generics, status, views
 from rest_framework.response import Response
 
@@ -5,7 +6,14 @@ from apps.collections.models import Collection
 from apps.favorites.models import FavoriteList
 
 from .models import EmailLog, NotificationTemplate
-from .serializers import EmailLogSerializer, NotificationTemplateSerializer, SendInviteSerializer, SendReminderSerializer
+from .serializers import (
+    EmailLogSerializer,
+    MarkNotificationsReadSerializer,
+    NotificationTemplateSerializer,
+    SendInviteSerializer,
+    SendReminderSerializer,
+    UnreadNotificationSerializer,
+)
 from .tasks import send_collection_invite_email
 
 
@@ -14,11 +22,19 @@ class SendCollectionInviteView(views.APIView):
         collection = Collection.objects.get(id=collection_id, owner=request.user)
         serializer = SendInviteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        send_collection_invite_email.delay(
-            str(collection.id),
-            serializer.validated_data["recipient_email"],
-            serializer.validated_data.get("message", ""),
+        log = EmailLog.objects.create(
+            owner=request.user,
+            collection=collection,
+            recipient_email=serializer.validated_data["recipient_email"],
+            email_type="collection_invite",
         )
+        try:
+            send_collection_invite_email.delay(str(log.id), serializer.validated_data.get("message", ""))
+        except Exception as exc:
+            log.status = "failed"
+            log.error_message = f"Email queue unavailable: {exc}"
+            log.save(update_fields=["status", "error_message"])
+            return Response({"detail": "Email queue unavailable. The invite was not sent."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response({"detail": "Invite queued."}, status=status.HTTP_202_ACCEPTED)
 
 
@@ -35,6 +51,31 @@ class EmailLogListView(generics.ListAPIView):
 
     def get_queryset(self):
         return EmailLog.objects.filter(owner=self.request.user)
+
+
+class UnreadNotificationListView(generics.ListAPIView):
+    serializer_class = UnreadNotificationSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        return (
+            EmailLog.objects
+            .filter(owner=self.request.user, status__in=["sent", "failed"], read_at__isnull=True)
+            .select_related("collection")
+            .order_by("-sent_at", "-created_at")[:20]
+        )
+
+
+class MarkNotificationsReadView(views.APIView):
+    def post(self, request):
+        serializer = MarkNotificationsReadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        queryset = EmailLog.objects.filter(owner=request.user, status__in=["sent", "failed"], read_at__isnull=True)
+        ids = serializer.validated_data.get("ids")
+        if ids:
+            queryset = queryset.filter(id__in=ids)
+        updated = queryset.update(read_at=timezone.now())
+        return Response({"detail": "Notifications marked read.", "updated": updated})
 
 
 class NotificationTemplateListCreateView(generics.ListCreateAPIView):
