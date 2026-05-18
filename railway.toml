@@ -4,7 +4,6 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 preDeployCommand = "python manage.py migrate --noinput"
-startCommand = "sh ./start.sh"
 healthcheckPath = "/health/"
 healthcheckTimeout = 60
 restartPolicyType = "ON_FAILURE"
