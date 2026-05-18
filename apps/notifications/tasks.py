@@ -1,4 +1,5 @@
 from celery import shared_task
+from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
 
@@ -25,9 +26,29 @@ def _send(owner, collection, recipient_email, email_type, subject, body):
 
 
 @shared_task
-def send_collection_invite_email(collection_id, recipient_email):
-    collection = Collection.objects.select_related("owner").get(id=collection_id)
-    return _send(collection.owner, collection, recipient_email, "collection_invite", f"Gallery invitation: {collection.title}", collection.description or "Your gallery is ready.")
+def send_collection_invite_email(collection_id, recipient_email, message=""):
+    collection = Collection.objects.select_related("owner", "download_settings").get(id=collection_id)
+    gallery_url = f"{settings.FRONTEND_URL.rstrip('/')}/galleries/{collection.slug}"
+    owner_name = " ".join(part for part in [collection.owner.first_name, collection.owner.last_name] if part).strip()
+    sender_name = collection.owner.business_name or owner_name or collection.owner.email
+    body_parts = [
+        message.strip() or f"{sender_name} shared a gallery with you.",
+        "",
+        collection.title,
+    ]
+    if collection.description:
+        body_parts.extend(["", collection.description])
+    body_parts.extend(["", f"View the gallery: {gallery_url}"])
+    if hasattr(collection, "download_settings") and collection.download_settings.download_pin_enabled:
+        body_parts.extend(["", f"Download PIN: {collection.download_settings.download_pin}"])
+    return _send(
+        collection.owner,
+        collection,
+        recipient_email,
+        "collection_invite",
+        f"Gallery invitation: {collection.title}",
+        "\n".join(body_parts),
+    )
 
 
 @shared_task

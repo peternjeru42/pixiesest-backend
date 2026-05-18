@@ -19,6 +19,7 @@ class EmailLogSerializer(serializers.ModelSerializer):
 
 class SendInviteSerializer(serializers.Serializer):
     recipient_email = serializers.EmailField()
+    message = serializers.CharField(required=False, allow_blank=True, max_length=1200)
 
 
 class SendReminderSerializer(serializers.Serializer):

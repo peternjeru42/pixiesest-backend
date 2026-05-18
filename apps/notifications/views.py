@@ -14,7 +14,11 @@ class SendCollectionInviteView(views.APIView):
         collection = Collection.objects.get(id=collection_id, owner=request.user)
         serializer = SendInviteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        send_collection_invite_email.delay(str(collection.id), serializer.validated_data["recipient_email"])
+        send_collection_invite_email.delay(
+            str(collection.id),
+            serializer.validated_data["recipient_email"],
+            serializer.validated_data.get("message", ""),
+        )
         return Response({"detail": "Invite queued."}, status=status.HTTP_202_ACCEPTED)
 
 
