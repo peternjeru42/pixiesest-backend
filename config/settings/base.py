@@ -13,6 +13,14 @@ def env(name, default=None):
     return os.environ.get(name, default)
 
 
+def env_first(*names, default=None):
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return default
+
+
 def env_bool(name, default=False):
     value = os.environ.get(name)
     if value is None:
@@ -188,8 +196,14 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
 }
 
-CELERY_BROKER_URL = env("REDIS_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = env("REDIS_URL", "redis://localhost:6379/0")
+CELERY_BROKER_URL = env_first("CELERY_BROKER_URL", "REDIS_URL", "REDIS_PRIVATE_URL", default="redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = env_first(
+    "CELERY_RESULT_BACKEND",
+    "CELERY_BROKER_URL",
+    "REDIS_URL",
+    "REDIS_PRIVATE_URL",
+    default=CELERY_BROKER_URL,
+)
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
