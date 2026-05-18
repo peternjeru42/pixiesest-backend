@@ -60,7 +60,6 @@ def _asset_image_url(asset):
     return (
         get_public_object_url(asset.thumbnail_file_key)
         or get_public_object_url(asset.preview_file_key)
-        or get_public_object_url(asset.original_file_key)
     )
 
 

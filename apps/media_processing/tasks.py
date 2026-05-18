@@ -2,6 +2,7 @@ import io
 import logging
 
 from celery import shared_task
+from django.db import transaction
 from django.utils import timezone
 from PIL import Image, ExifTags
 
@@ -13,6 +14,12 @@ from apps.storage.services import build_preview_key, build_thumbnail_key, downlo
 from .models import MediaProcessingJob
 
 logger = logging.getLogger(__name__)
+
+
+def _required_job_types(asset):
+    if asset.media_type in {"photo", "gif"}:
+        return {"photo_preview", "photo_thumbnail", "photo_metadata"}
+    return {"video_thumbnail", "video_metadata"}
 
 
 def _job(asset, job_type):
@@ -33,6 +40,41 @@ def _fail(job, exc):
     job.error_message = str(exc)
     job.completed_at = timezone.now()
     job.save(update_fields=["status", "error_message", "completed_at", "updated_at"])
+    _mark_asset_processing_failed(job.media_asset_id)
+
+
+def _mark_asset_processing_failed(media_asset_id):
+    asset = MediaAsset.objects.filter(id=media_asset_id).first()
+    if not asset:
+        return
+    asset.status = "failed"
+    asset.save(update_fields=["status", "updated_at"])
+    _update_upload_session(asset, "failed")
+
+
+def _finish_asset_if_processing_complete(media_asset_id):
+    with transaction.atomic():
+        asset = MediaAsset.objects.select_for_update().select_related("owner").get(id=media_asset_id)
+        if asset.status != "processing":
+            return
+
+        required_job_types = _required_job_types(asset)
+        completed_job_types = set(
+            MediaProcessingJob.objects.filter(
+                media_asset=asset,
+                job_type__in=required_job_types,
+                status="completed",
+            ).values_list("job_type", flat=True)
+        )
+        if completed_job_types != required_job_types:
+            return
+
+        asset.status = "ready"
+        asset.processed_at = timezone.now()
+        asset.save(update_fields=["status", "processed_at", "updated_at"])
+        _update_upload_session(asset, "completed")
+        increase_storage_usage(asset.owner, asset.file_size_bytes, "original_upload", media_asset=asset)
+        recalculate_user_profile_stats(asset.owner)
 
 
 @shared_task
@@ -40,26 +82,20 @@ def process_uploaded_media(media_asset_id):
     asset = MediaAsset.objects.select_related("owner", "collection", "set").get(id=media_asset_id)
     try:
         asset.status = "processing"
-        asset.save(update_fields=["status", "updated_at"])
-        if asset.media_type in {"photo", "gif"}:
-            generate_photo_preview(str(asset.id))
-            generate_photo_thumbnail(str(asset.id))
-            extract_photo_metadata(str(asset.id))
-        else:
-            extract_video_metadata(str(asset.id))
-            generate_video_thumbnail(str(asset.id))
-        asset.status = "ready"
-        asset.processed_at = timezone.now()
+        asset.processed_at = None
         asset.save(update_fields=["status", "processed_at", "updated_at"])
-        _update_upload_session(asset, "completed")
-        increase_storage_usage(asset.owner, asset.file_size_bytes, "original_upload", media_asset=asset)
-        recalculate_user_profile_stats(asset.owner)
+        MediaProcessingJob.objects.filter(media_asset=asset, job_type__in=_required_job_types(asset)).delete()
+        if asset.media_type in {"photo", "gif"}:
+            generate_photo_preview.delay(str(asset.id))
+            generate_photo_thumbnail.delay(str(asset.id))
+            extract_photo_metadata.delay(str(asset.id))
+        else:
+            extract_video_metadata.delay(str(asset.id))
+            generate_video_thumbnail.delay(str(asset.id))
         return str(asset.id)
     except Exception:
         logger.exception("Media processing failed.", extra={"media_asset_id": str(asset.id)})
-        asset.status = "failed"
-        asset.save(update_fields=["status", "updated_at"])
-        _update_upload_session(asset, "failed")
+        _mark_asset_processing_failed(asset.id)
         raise
 
 
@@ -85,6 +121,7 @@ def generate_photo_preview(media_asset_id):
         asset.original_height = asset.original_height or image.height
         asset.save(update_fields=["preview_file_key", "original_width", "original_height", "updated_at"])
         _complete(job)
+        _finish_asset_if_processing_complete(asset.id)
     except Exception as exc:
         _fail(job, exc)
         raise
@@ -104,6 +141,7 @@ def generate_photo_thumbnail(media_asset_id):
         asset.thumbnail_file_key = key
         asset.save(update_fields=["thumbnail_file_key", "updated_at"])
         _complete(job)
+        _finish_asset_if_processing_complete(asset.id)
     except Exception as exc:
         _fail(job, exc)
         raise
@@ -123,6 +161,7 @@ def extract_photo_metadata(media_asset_id):
             decoded[ExifTags.TAGS.get(key, key)] = str(value)
         MediaAssetMetadata.objects.update_or_create(media_asset=asset, defaults={"extra_metadata": decoded})
         _complete(job)
+        _finish_asset_if_processing_complete(asset.id)
     except Exception as exc:
         _fail(job, exc)
         raise
@@ -135,6 +174,7 @@ def extract_video_metadata(media_asset_id):
     try:
         MediaAssetMetadata.objects.get_or_create(media_asset=asset)
         _complete(job)
+        _finish_asset_if_processing_complete(asset.id)
     except Exception as exc:
         _fail(job, exc)
         raise
@@ -149,6 +189,7 @@ def generate_video_thumbnail(media_asset_id):
         asset.thumbnail_file_key = asset.thumbnail_file_key
         asset.save(update_fields=["thumbnail_file_key", "updated_at"])
         _complete(job)
+        _finish_asset_if_processing_complete(asset.id)
     except Exception as exc:
         _fail(job, exc)
         raise

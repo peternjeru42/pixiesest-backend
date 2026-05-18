@@ -124,7 +124,7 @@ class PublicMediaSignedUrlView(PublicBase, views.APIView):
         asset = MediaAsset.objects.exclude(set__visibility="hidden").select_related("collection", "set").get(id=media_id, status="ready", is_private=False)
         has_collection_access(request, asset.collection, require_client=bool(asset.set and asset.set.visibility == "client_only"))
         key = getattr(asset, self.key_name)
-        return Response({"url": generate_presigned_download_url(key, asset.display_filename) if key else None})
+        return Response({"url": generate_presigned_download_url(key) if key else None})
 
 
 class PublicMediaThumbnailUrlView(PublicMediaSignedUrlView):

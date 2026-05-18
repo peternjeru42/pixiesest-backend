@@ -88,8 +88,6 @@ def queue_media_processing(asset_id):
     try:
         process_uploaded_media.delay(str(asset_id))
     except Exception:
-        logger.exception("Unable to enqueue media processing; processing inline.", extra={"media_asset_id": str(asset_id)})
-        try:
-            process_uploaded_media(str(asset_id))
-        except Exception:
-            logger.exception("Inline media processing failed.", extra={"media_asset_id": str(asset_id)})
+        logger.exception("Unable to enqueue media processing.", extra={"media_asset_id": str(asset_id)})
+        MediaAsset.objects.filter(id=asset_id).update(status="failed", updated_at=timezone.now())
+        MediaUploadSession.objects.filter(media_asset_id=asset_id).update(status="failed", updated_at=timezone.now())
