@@ -26,6 +26,27 @@ def _has_client_access(request, collection):
     return bool(session and session.access_type == "client" and session.collection_id == collection.id)
 
 
+def _is_owner_preview(request, collection):
+    return (
+        request.query_params.get("preview") == "1"
+        and request.user.is_authenticated
+        and collection.owner_id == request.user.id
+    )
+
+
+def _require_collection_access(request, collection, require_client=False):
+    if _is_owner_preview(request, collection):
+        return
+    has_collection_access(request, collection, require_client=require_client)
+
+
+def _get_collection(request, slug):
+    queryset = Collection.objects.select_related("privacy_settings", "download_settings", "design_settings")
+    if request.query_params.get("preview") == "1" and request.user.is_authenticated:
+        return get_object_or_404(queryset, slug=slug, owner=request.user)
+    return get_object_or_404(queryset.filter(status="published"), slug=slug)
+
+
 class PublicFolderDetailView(PublicBase, generics.RetrieveAPIView):
     serializer_class = PublicFolderSerializer
     lookup_field = "slug"
@@ -53,11 +74,14 @@ class PublicCollectionDetailView(PublicBase, generics.RetrieveAPIView):
     lookup_url_kwarg = "collection_slug"
 
     def get_queryset(self):
-        return Collection.objects.filter(status="published").select_related("privacy_settings", "download_settings", "design_settings")
+        queryset = Collection.objects.select_related("privacy_settings", "download_settings", "design_settings")
+        if self.request.query_params.get("preview") == "1" and self.request.user.is_authenticated:
+            return queryset.filter(owner=self.request.user)
+        return queryset.filter(status="published")
 
     def get_object(self):
         obj = super().get_object()
-        has_collection_access(self.request, obj)
+        _require_collection_access(self.request, obj)
         return obj
 
 
@@ -65,10 +89,10 @@ class PublicCollectionSetsView(PublicBase, generics.ListAPIView):
     serializer_class = PublicCollectionSetSerializer
 
     def get_queryset(self):
-        collection = Collection.objects.get(slug=self.kwargs["collection_slug"], status="published")
-        has_collection_access(self.request, collection)
+        collection = _get_collection(self.request, self.kwargs["collection_slug"])
+        _require_collection_access(self.request, collection)
         queryset = CollectionSet.objects.filter(collection=collection).exclude(visibility="hidden")
-        if not _has_client_access(self.request, collection):
+        if not (_has_client_access(self.request, collection) or _is_owner_preview(self.request, collection)):
             queryset = queryset.exclude(visibility="client_only")
         return queryset
 
@@ -77,10 +101,10 @@ class PublicCollectionMediaView(PublicBase, generics.ListAPIView):
     serializer_class = PublicMediaAssetSerializer
 
     def get_queryset(self):
-        collection = Collection.objects.get(slug=self.kwargs["collection_slug"], status="published")
-        has_collection_access(self.request, collection)
+        collection = _get_collection(self.request, self.kwargs["collection_slug"])
+        _require_collection_access(self.request, collection)
         queryset = MediaAsset.objects.filter(collection=collection, status="ready", is_private=False).exclude(set__visibility="hidden")
-        if not _has_client_access(self.request, collection):
+        if not (_has_client_access(self.request, collection) or _is_owner_preview(self.request, collection)):
             queryset = queryset.exclude(set__visibility="client_only")
         return queryset.select_related("collection", "set")
 
@@ -93,7 +117,7 @@ class PublicSetDetailView(PublicBase, generics.RetrieveAPIView):
 
     def get_object(self):
         obj = super().get_object()
-        has_collection_access(self.request, obj.collection, require_client=obj.visibility == "client_only")
+        _require_collection_access(self.request, obj.collection, require_client=obj.visibility == "client_only")
         return obj
 
 
@@ -102,7 +126,7 @@ class PublicSetMediaView(PublicBase, generics.ListAPIView):
 
     def get_queryset(self):
         set_obj = CollectionSet.objects.select_related("collection").get(slug=self.kwargs["set_slug"])
-        has_collection_access(self.request, set_obj.collection, require_client=set_obj.visibility == "client_only")
+        _require_collection_access(self.request, set_obj.collection, require_client=set_obj.visibility == "client_only")
         return MediaAsset.objects.filter(set=set_obj, status="ready", is_private=False)
 
 
@@ -113,7 +137,7 @@ class PublicMediaDetailView(PublicBase, generics.RetrieveAPIView):
 
     def get_object(self):
         obj = super().get_object()
-        has_collection_access(self.request, obj.collection, require_client=bool(obj.set and obj.set.visibility == "client_only"))
+        _require_collection_access(self.request, obj.collection, require_client=bool(obj.set and obj.set.visibility == "client_only"))
         return obj
 
 
@@ -122,7 +146,7 @@ class PublicMediaSignedUrlView(PublicBase, views.APIView):
 
     def get(self, request, media_id):
         asset = MediaAsset.objects.exclude(set__visibility="hidden").select_related("collection", "set").get(id=media_id, status="ready", is_private=False)
-        has_collection_access(request, asset.collection, require_client=bool(asset.set and asset.set.visibility == "client_only"))
+        _require_collection_access(request, asset.collection, require_client=bool(asset.set and asset.set.visibility == "client_only"))
         key = getattr(asset, self.key_name)
         return Response({"url": generate_presigned_download_url(key) if key else None})
 
