@@ -15,7 +15,7 @@ from .serializers import (
     ReorderCollectionSerializer,
     SetCollectionCoverSerializer,
 )
-from .services import duplicate_collection, publish_collection
+from .services import delete_collection, duplicate_collection, publish_collection
 
 
 class CollectionViewSet(viewsets.ModelViewSet):
@@ -27,7 +27,7 @@ class CollectionViewSet(viewsets.ModelViewSet):
         return Collection.objects.filter(owner=self.request.user).select_related("folder", "cover_asset", "download_settings")
 
     def perform_destroy(self, instance):
-        instance.delete()
+        delete_collection(instance)
 
     @decorators.action(detail=True, methods=["post"])
     def publish(self, request, collection_id=None):
