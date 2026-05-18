@@ -5,7 +5,7 @@ from apps.core.validators import validate_upload_file_size, validate_upload_mime
 
 class PresignUploadSerializer(serializers.Serializer):
     collection_id = serializers.UUIDField()
-    set_id = serializers.UUIDField()
+    set_id = serializers.UUIDField(required=False, allow_null=True)
     original_filename = serializers.CharField(max_length=255)
     mime_type = serializers.CharField(max_length=120)
     file_size_bytes = serializers.IntegerField(min_value=1)

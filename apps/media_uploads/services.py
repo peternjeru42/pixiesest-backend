@@ -26,7 +26,7 @@ def infer_media_type(mime_type):
 def create_upload_session(user, *, collection_id, set_id, original_filename, mime_type, file_size_bytes):
     check_user_has_storage_space(user, file_size_bytes)
     collection = Collection.objects.get(id=collection_id, owner=user)
-    set_obj = CollectionSet.objects.get(id=set_id, collection=collection)
+    set_obj = CollectionSet.objects.get(id=set_id, collection=collection) if set_id else None
     ext = extension_from_filename(original_filename)
     asset = MediaAsset.objects.create(
         owner=user,

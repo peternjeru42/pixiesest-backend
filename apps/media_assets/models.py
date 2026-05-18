@@ -17,7 +17,13 @@ class MediaAsset(BaseUUIDModel, TimeStampedModel, SoftDeleteModel):
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="media_assets")
     collection = models.ForeignKey("collections.Collection", on_delete=models.CASCADE, related_name="media_assets")
-    set = models.ForeignKey("collection_sets.CollectionSet", on_delete=models.CASCADE, related_name="media_assets")
+    set = models.ForeignKey(
+        "collection_sets.CollectionSet",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="media_assets",
+    )
     media_type = models.CharField(max_length=10, choices=MEDIA_TYPE_CHOICES, db_index=True)
     original_filename = models.CharField(max_length=255)
     display_filename = models.CharField(max_length=255)

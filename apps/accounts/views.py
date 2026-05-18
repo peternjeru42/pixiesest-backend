@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from django.contrib.auth import logout as django_logout
 from django.contrib.auth import get_user_model
@@ -23,10 +25,12 @@ from .serializers import (
     RegisterSerializer,
     RegisterVerifySerializer,
     UserSerializer,
+    EmailDeliveryError,
     send_signup_verification_code,
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class RegisterView(generics.CreateAPIView):
@@ -186,7 +190,19 @@ class PasswordResetRequestView(APIView):
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        try:
+            serializer.save()
+        except EmailDeliveryError:
+            logger.exception("Password reset email delivery failed.")
+            return Response(
+                {
+                    "detail": (
+                        "Password reset email could not be sent. Check the backend email provider settings "
+                        "and try again."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response({"detail": "If the email exists, reset instructions will be sent."})
 
 

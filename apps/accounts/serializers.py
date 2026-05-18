@@ -1,6 +1,7 @@
 from urllib.parse import urlencode
 from datetime import timedelta
 from secrets import randbelow
+from smtplib import SMTPException
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
@@ -21,6 +22,10 @@ User = get_user_model()
 
 SIGNUP_CODE_TTL_MINUTES = 5
 SIGNUP_CODE_MAX_ATTEMPTS = 5
+
+
+class EmailDeliveryError(Exception):
+    pass
 
 
 def _generate_signup_code():
@@ -182,17 +187,20 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         reset_token = f"{uid}:{token}"
         reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?{urlencode({'token': reset_token})}"
 
-        send_mail(
-            "Reset your Droptop password",
-            (
-                "We received a request to reset your Droptop password.\n\n"
-                f"Open this link to choose a new password:\n{reset_url}\n\n"
-                "This link expires in 1 hour. If you did not request this, you can ignore this email."
-            ),
-            settings.DEFAULT_FROM_EMAIL,
-            [user.email],
-            fail_silently=False,
-        )
+        try:
+            send_mail(
+                "Reset your Droptop password",
+                (
+                    "We received a request to reset your Droptop password.\n\n"
+                    f"Open this link to choose a new password:\n{reset_url}\n\n"
+                    "This link expires in 1 hour. If you did not request this, you can ignore this email."
+                ),
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+        except (SMTPException, OSError, TimeoutError) as exc:
+            raise EmailDeliveryError("Password reset email could not be sent.") from exc
         return user
 
 

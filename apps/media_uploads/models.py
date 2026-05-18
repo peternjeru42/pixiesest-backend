@@ -18,7 +18,7 @@ class MediaUploadSession(BaseUUIDModel, TimeStampedModel):
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="upload_sessions")
     collection = models.ForeignKey("collections.Collection", on_delete=models.CASCADE)
-    set = models.ForeignKey("collection_sets.CollectionSet", on_delete=models.CASCADE)
+    set = models.ForeignKey("collection_sets.CollectionSet", on_delete=models.SET_NULL, null=True, blank=True)
     media_asset = models.ForeignKey("media_assets.MediaAsset", on_delete=models.SET_NULL, null=True, blank=True)
     upload_id = models.CharField(max_length=120, unique=True, db_index=True)
     original_filename = models.CharField(max_length=255)

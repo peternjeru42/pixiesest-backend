@@ -113,7 +113,7 @@ class PublicMediaDetailView(PublicBase, generics.RetrieveAPIView):
 
     def get_object(self):
         obj = super().get_object()
-        has_collection_access(self.request, obj.collection, require_client=obj.set.visibility == "client_only")
+        has_collection_access(self.request, obj.collection, require_client=bool(obj.set and obj.set.visibility == "client_only"))
         return obj
 
 
@@ -122,7 +122,7 @@ class PublicMediaSignedUrlView(PublicBase, views.APIView):
 
     def get(self, request, media_id):
         asset = MediaAsset.objects.exclude(set__visibility="hidden").select_related("collection", "set").get(id=media_id, status="ready", is_private=False)
-        has_collection_access(request, asset.collection, require_client=asset.set.visibility == "client_only")
+        has_collection_access(request, asset.collection, require_client=bool(asset.set and asset.set.visibility == "client_only"))
         key = getattr(asset, self.key_name)
         return Response({"url": generate_presigned_download_url(key, asset.display_filename) if key else None})
 
