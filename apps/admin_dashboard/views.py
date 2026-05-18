@@ -1,10 +1,14 @@
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Count, Sum
+from django.contrib.auth import get_user_model
+from django.db.models import Q
+from django.db.models import BigIntegerField, Count, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import views
 from rest_framework.response import Response
 
 from apps.activity.models import ActivityEvent
+from apps.core.permissions import IsStaffUser
 from apps.collections.models import Collection
 from apps.collection_sets.models import CollectionSet
 from apps.downloads.models import DownloadLog
@@ -14,6 +18,9 @@ from apps.media_assets.models import MediaAsset
 from apps.media_assets.storage import refresh_missing_derived_storage_sizes, storage_totals_for_queryset
 from apps.quotas.models import StorageQuota
 from apps.storage.services import get_public_object_url
+
+
+User = get_user_model()
 
 
 def _display_name(user):
@@ -192,5 +199,73 @@ class ClientsSummaryView(views.APIView):
             {
                 "favorite_clients": FavoriteList.objects.filter(collection__owner=request.user).values("client_email").distinct().count(),
                 "download_clients": DownloadLog.objects.filter(collection__owner=request.user).values("client_email").distinct().count(),
+            }
+        )
+
+
+class AdminDashboardView(views.APIView):
+    permission_classes = [IsStaffUser]
+
+    def get(self, request):
+        live_media_filter = Q(media_assets__deleted_at__isnull=True) & ~Q(media_assets__status="deleted")
+        users = User.objects.annotate(
+            original_storage_bytes=Coalesce(Sum("media_assets__file_size_bytes", filter=live_media_filter), Value(0), output_field=BigIntegerField()),
+            preview_storage_bytes=Coalesce(Sum("media_assets__preview_file_size_bytes", filter=live_media_filter), Value(0), output_field=BigIntegerField()),
+            thumbnail_storage_bytes=Coalesce(Sum("media_assets__thumbnail_file_size_bytes", filter=live_media_filter), Value(0), output_field=BigIntegerField()),
+            collections_count=Count("collections", filter=Q(collections__deleted_at__isnull=True), distinct=True),
+            folders_count=Count("folders", filter=Q(folders__deleted_at__isnull=True), distinct=True),
+            photos_count=Count("media_assets", filter=live_media_filter & Q(media_assets__media_type="photo"), distinct=True),
+        )
+
+        user_rows = []
+        for user in users:
+            original = int(user.original_storage_bytes or 0)
+            preview = int(user.preview_storage_bytes or 0)
+            thumbnail = int(user.thumbnail_storage_bytes or 0)
+            user_rows.append(
+                {
+                    "id": str(user.id),
+                    "email": user.email,
+                    "name": _display_name(user),
+                    "business_name": user.business_name,
+                    "is_active": user.is_active,
+                    "is_staff": user.is_staff,
+                    "date_joined": user.date_joined,
+                    "last_login": user.last_login,
+                    "collections_count": user.collections_count,
+                    "folders_count": user.folders_count,
+                    "photos_count": user.photos_count,
+                    "storage": {
+                        "total_bytes": original + preview + thumbnail,
+                        "original_bytes": original,
+                        "preview_bytes": preview,
+                        "thumbnail_bytes": thumbnail,
+                    },
+                }
+            )
+
+        user_rows.sort(key=lambda row: row["storage"]["total_bytes"], reverse=True)
+
+        live_media = MediaAsset.all_objects.exclude(status="deleted").filter(deleted_at__isnull=True)
+        storage = live_media.aggregate(
+            original=Coalesce(Sum("file_size_bytes"), Value(0), output_field=BigIntegerField()),
+            preview=Coalesce(Sum("preview_file_size_bytes"), Value(0), output_field=BigIntegerField()),
+            thumbnail=Coalesce(Sum("thumbnail_file_size_bytes"), Value(0), output_field=BigIntegerField()),
+        )
+        total_storage = int(storage["original"] or 0) + int(storage["preview"] or 0) + int(storage["thumbnail"] or 0)
+
+        return Response(
+            {
+                "users": user_rows,
+                "stats": {
+                    "collections_created": Collection.all_objects.count(),
+                    "folders_created": Folder.all_objects.count(),
+                    "photos_uploaded": MediaAsset.all_objects.filter(media_type="photo").count(),
+                    "total_space_consumed_bytes": total_storage,
+                    "shared_collections": Collection.objects.filter(status="published").count(),
+                    "total_users": User.objects.count(),
+                    "deleted_folders": Folder.all_objects.deleted().count(),
+                    "deleted_collections": Collection.all_objects.deleted().count(),
+                },
             }
         )
