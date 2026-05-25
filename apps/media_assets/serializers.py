@@ -8,6 +8,7 @@ from .models import MediaAsset, MediaAssetMetadata
 class MediaAssetSerializer(serializers.ModelSerializer):
     preview_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
+    playback_url = serializers.SerializerMethodField()
 
     class Meta:
         model = MediaAsset
@@ -39,10 +40,16 @@ class MediaAssetSerializer(serializers.ModelSerializer):
     def get_thumbnail_url(self, obj):
         return get_public_object_url(obj.thumbnail_file_key)
 
+    def get_playback_url(self, obj):
+        if obj.media_type != "video":
+            return ""
+        return get_public_object_url(obj.original_file_key)
+
 
 class MediaAssetPublicSerializer(serializers.ModelSerializer):
     preview_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
+    playback_url = serializers.SerializerMethodField()
 
     class Meta:
         model = MediaAsset
@@ -54,6 +61,11 @@ class MediaAssetPublicSerializer(serializers.ModelSerializer):
 
     def get_thumbnail_url(self, obj):
         return get_public_object_url(obj.thumbnail_file_key)
+
+    def get_playback_url(self, obj):
+        if obj.media_type != "video":
+            return ""
+        return get_public_object_url(obj.original_file_key)
 
 
 class MediaAssetMetadataSerializer(serializers.ModelSerializer):

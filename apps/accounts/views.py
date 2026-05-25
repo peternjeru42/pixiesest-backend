@@ -5,6 +5,7 @@ from django.contrib.auth import logout as django_logout
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
+from google.auth import exceptions as google_auth_exceptions
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from rest_framework import generics, permissions, status
@@ -41,7 +42,19 @@ class RegisterView(generics.CreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        try:
+            serializer.save()
+        except EmailDeliveryError:
+            logger.exception("Signup verification email delivery failed.")
+            return Response(
+                {
+                    "detail": (
+                        "Signup verification email could not be sent. Check the backend email provider settings "
+                        "and try again."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response(
             {"detail": "Verification code sent. Complete signup within 5 minutes.", "expires_in": 300},
             status=status.HTTP_202_ACCEPTED,
@@ -89,6 +102,12 @@ class GoogleAuthView(APIView):
                 serializer.validated_data["credential"],
                 google_requests.Request(),
                 settings.GOOGLE_CLIENT_ID,
+            )
+        except google_auth_exceptions.TransportError as exc:
+            logger.exception("Google credential verification request failed.")
+            return Response(
+                {"detail": "Google authentication is temporarily unavailable. Please try again."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         except ValueError as exc:
             raise AuthenticationFailed("Invalid Google credential.") from exc
@@ -235,6 +254,18 @@ class EmailResendVerificationView(APIView):
         serializer = EmailTokenSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data.get("email")
-        if email and not User.objects.filter(email__iexact=email).exists():
-            send_signup_verification_code(email)
+        try:
+            if email and not User.objects.filter(email__iexact=email).exists():
+                send_signup_verification_code(email)
+        except EmailDeliveryError:
+            logger.exception("Signup verification email resend failed.")
+            return Response(
+                {
+                    "detail": (
+                        "Signup verification email could not be sent. Check the backend email provider settings "
+                        "and try again."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response({"detail": "If signup is pending, a new verification code will be sent.", "expires_in": 300})

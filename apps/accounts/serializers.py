@@ -36,23 +36,31 @@ def send_signup_verification_code(email):
     clean_email = email.strip().lower()
     code = _generate_signup_code()
     now = timezone.now()
-    SignupVerificationCode.objects.filter(email__iexact=clean_email, consumed_at__isnull=True).update(consumed_at=now)
-    SignupVerificationCode.objects.create(
+    verification = SignupVerificationCode.objects.create(
         email=clean_email,
         code_hash=make_password(code),
         expires_at=now + timedelta(minutes=SIGNUP_CODE_TTL_MINUTES),
     )
-    send_mail(
-        "Your Droptop signup code",
-        (
-            "Use this code to finish creating your Droptop account:\n\n"
-            f"{code}\n\n"
-            "This code expires in 5 minutes. If you did not request it, you can ignore this email."
-        ),
-        settings.DEFAULT_FROM_EMAIL,
-        [clean_email],
-        fail_silently=False,
-    )
+    try:
+        send_mail(
+            "Your Droptop signup code",
+            (
+                "Use this code to finish creating your Droptop account:\n\n"
+                f"{code}\n\n"
+                "This code expires in 5 minutes. If you did not request it, you can ignore this email."
+            ),
+            settings.DEFAULT_FROM_EMAIL,
+            [clean_email],
+            fail_silently=False,
+        )
+    except (SMTPException, OSError, TimeoutError) as exc:
+        verification.delete()
+        raise EmailDeliveryError("Signup verification email could not be sent.") from exc
+
+    SignupVerificationCode.objects.filter(
+        email__iexact=clean_email,
+        consumed_at__isnull=True,
+    ).exclude(pk=verification.pk).update(consumed_at=now)
 
 
 class UserSerializer(serializers.ModelSerializer):

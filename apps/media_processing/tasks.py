@@ -1,6 +1,9 @@
 import io
 import logging
+import tempfile
+from pathlib import Path
 
+import ffmpeg
 from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
@@ -227,6 +230,23 @@ def extract_video_metadata(media_asset_id):
     asset = MediaAsset.objects.get(id=media_asset_id)
     job = _job(asset, "video_metadata")
     try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / f"source.{asset.extension or 'mp4'}"
+            source_path.write_bytes(download_bytes(asset.original_file_key))
+            probe = ffmpeg.probe(str(source_path))
+
+        video_stream = next(
+            (stream for stream in probe.get("streams", []) if stream.get("codec_type") == "video"),
+            {},
+        )
+        duration = video_stream.get("duration") or probe.get("format", {}).get("duration")
+        if duration:
+            asset.duration_seconds = max(0, round(float(duration)))
+        if video_stream.get("width"):
+            asset.original_width = int(video_stream["width"])
+        if video_stream.get("height"):
+            asset.original_height = int(video_stream["height"])
+        asset.save(update_fields=["duration_seconds", "original_width", "original_height", "updated_at"])
         MediaAssetMetadata.objects.get_or_create(media_asset=asset)
         _complete(job)
         _finish_asset_if_processing_complete(asset.id)
@@ -240,9 +260,22 @@ def generate_video_thumbnail(media_asset_id):
     asset = MediaAsset.objects.get(id=media_asset_id)
     job = _job(asset, "video_thumbnail")
     try:
-        # Placeholder: production workers should call ffmpeg to create a still frame.
-        asset.thumbnail_file_key = asset.thumbnail_file_key
-        asset.save(update_fields=["thumbnail_file_key", "updated_at"])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / f"source.{asset.extension or 'mp4'}"
+            source_path.write_bytes(download_bytes(asset.original_file_key))
+            body, _ = (
+                ffmpeg
+                .input(str(source_path), ss=0)
+                .filter("scale", "min(600,iw)", -2)
+                .output("pipe:", vframes=1, format="image2", vcodec="webp")
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+
+        thumbnail_key = build_thumbnail_key(asset.owner_id, asset.collection_id, asset.id)
+        upload_bytes(thumbnail_key, body, "image/webp")
+        asset.thumbnail_file_key = thumbnail_key
+        asset.thumbnail_file_size_bytes = len(body)
+        asset.save(update_fields=["thumbnail_file_key", "thumbnail_file_size_bytes", "updated_at"])
         _complete(job)
         _finish_asset_if_processing_complete(asset.id)
     except Exception as exc:
