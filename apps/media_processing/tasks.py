@@ -116,6 +116,33 @@ def _save_webp_variant(image, size, quality, key):
     return len(body)
 
 
+def _video_rotation_degrees(video_stream):
+    rotate_tag = video_stream.get("tags", {}).get("rotate")
+    if rotate_tag not in {None, ""}:
+        try:
+            return int(float(rotate_tag))
+        except (TypeError, ValueError):
+            pass
+
+    for side_data in video_stream.get("side_data_list", []):
+        rotation = side_data.get("rotation")
+        if rotation not in {None, ""}:
+            try:
+                return int(float(rotation))
+            except (TypeError, ValueError):
+                pass
+    return 0
+
+
+def _video_display_dimensions(video_stream):
+    width = int(video_stream.get("width") or 0)
+    height = int(video_stream.get("height") or 0)
+    rotation = abs(_video_rotation_degrees(video_stream)) % 180
+    if rotation == 90:
+        return height, width
+    return width, height
+
+
 @shared_task
 def process_photo_media(media_asset_id):
     asset = MediaAsset.objects.select_related("owner", "collection").get(id=media_asset_id)
@@ -242,10 +269,11 @@ def extract_video_metadata(media_asset_id):
         duration = video_stream.get("duration") or probe.get("format", {}).get("duration")
         if duration:
             asset.duration_seconds = max(0, round(float(duration)))
-        if video_stream.get("width"):
-            asset.original_width = int(video_stream["width"])
-        if video_stream.get("height"):
-            asset.original_height = int(video_stream["height"])
+        display_width, display_height = _video_display_dimensions(video_stream)
+        if display_width:
+            asset.original_width = display_width
+        if display_height:
+            asset.original_height = display_height
         asset.save(update_fields=["duration_seconds", "original_width", "original_height", "updated_at"])
         MediaAssetMetadata.objects.get_or_create(media_asset=asset)
         _complete(job)
