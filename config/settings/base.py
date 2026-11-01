@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import dj_database_url
+from celery.schedules import crontab
 from corsheaders.defaults import default_headers
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -208,6 +209,16 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_IGNORE_RESULT = env_bool("CELERY_TASK_IGNORE_RESULT", True)
+CELERY_WORKER_CONCURRENCY = int(env("CELERY_WORKER_CONCURRENCY", "1"))
+CELERY_WORKER_PREFETCH_MULTIPLIER = int(env("CELERY_WORKER_PREFETCH_MULTIPLIER", "1"))
+CELERY_WORKER_MAX_TASKS_PER_CHILD = int(env("CELERY_WORKER_MAX_TASKS_PER_CHILD", "20"))
+CELERY_BEAT_SCHEDULE = {
+    "cleanup-expired-download-exports": {
+        "task": "apps.downloads.tasks.cleanup_expired_download_exports",
+        "schedule": crontab(hour=4, minute=0),
+    },
+}
 
 CLOUDFLARE_R2_ACCOUNT_ID = env("CLOUDFLARE_R2_ACCOUNT_ID", "")
 CLOUDFLARE_R2_ACCESS_KEY_ID = env("CLOUDFLARE_R2_ACCESS_KEY_ID", "")

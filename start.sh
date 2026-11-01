@@ -2,7 +2,7 @@
 set -eu
 
 PORT="${PORT:-8000}"
-WEB_CONCURRENCY="${WEB_CONCURRENCY:-3}"
+WEB_CONCURRENCY="${WEB_CONCURRENCY:-1}"
 GUNICORN_TIMEOUT="${GUNICORN_TIMEOUT:-120}"
 
 exec gunicorn config.wsgi:application \

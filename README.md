@@ -84,14 +84,29 @@ DEFAULT_FROM_EMAIL="Droptop <no-reply@yourdomain.com>"
 
 ## Railway
 
-Set the environment variables from `.env.example` in Railway. The default Railway start command runs migrations then starts Gunicorn:
+Set the environment variables from `.env.example` in Railway. The backend uses
+the Docker image's default start command:
 
 ```bash
-python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 3
+sh ./start.sh
 ```
 
-Run a separate Railway worker service for Celery:
+Run a separate Railway worker service for Celery. The worker script also runs the
+periodic export cleanup scheduler; run exactly one worker service with `--beat`:
 
 ```bash
-celery -A config worker -l info
+sh ./worker.sh
 ```
+
+Set the Celery worker service's Railway **Config File Path** to
+`/railway.worker.toml`; the backend service continues to use `/railway.toml`.
+
+The production defaults use one Gunicorn worker and one Celery child process to
+bound idle and peak memory. Increase `WEB_CONCURRENCY` or
+`CELERY_WORKER_CONCURRENCY` only after checking Railway metrics. Configure the
+backend and worker with Railway's private `DATABASE_URL` and `REDIS_URL`
+reference variables (hosts should end in `.railway.internal`), not public URLs.
+
+In Railway, also verify that the production environment has one replica per
+service, remove unused PR/staging environments, and configure usage alerts and a
+hard spending limit under Workspace settings.

@@ -1,10 +1,14 @@
 import io
 import logging
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 import ffmpeg
+import redis
 from celery import shared_task
+from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 from PIL import Image, ExifTags, ImageOps
@@ -12,11 +16,54 @@ from PIL import Image, ExifTags, ImageOps
 from apps.media_assets.models import MediaAsset, MediaAssetMetadata
 from apps.profiles.services import recalculate_user_profile_stats
 from apps.quotas.services import recalculate_storage_usage
-from apps.storage.services import build_preview_key, build_thumbnail_key, download_bytes, upload_bytes
+from apps.storage.services import build_preview_key, build_thumbnail_key, download_bytes, download_to_file, upload_bytes
 
 from .models import MediaProcessingJob
 
 logger = logging.getLogger(__name__)
+STATS_REFRESH_DELAY_SECONDS = 10
+STATS_REFRESH_LOCK_SECONDS = 60 * 60
+
+
+@lru_cache(maxsize=1)
+def _redis_client():
+    return redis.Redis.from_url(settings.CELERY_BROKER_URL)
+
+
+def _stats_refresh_key(owner_id):
+    return f"media-processing:stats-refresh:{owner_id}"
+
+
+def schedule_owner_stats_refresh(owner_id):
+    key = _stats_refresh_key(owner_id)
+    try:
+        should_schedule = bool(
+            _redis_client().set(key, "1", nx=True, ex=STATS_REFRESH_LOCK_SECONDS)
+        )
+    except Exception:
+        logger.exception("Unable to debounce owner statistics refresh.", extra={"owner_id": str(owner_id)})
+        should_schedule = True
+    if should_schedule:
+        try:
+            refresh_owner_stats.apply_async(args=[str(owner_id)], countdown=STATS_REFRESH_DELAY_SECONDS)
+        except Exception:
+            logger.exception("Unable to enqueue owner statistics refresh.", extra={"owner_id": str(owner_id)})
+            try:
+                _redis_client().delete(key)
+            except Exception:
+                logger.exception("Unable to clear unscheduled statistics refresh lock.", extra={"owner_id": str(owner_id)})
+
+
+@shared_task(autoretry_for=(Exception,), retry_backoff=True, max_retries=3)
+def refresh_owner_stats(owner_id):
+    key = _stats_refresh_key(owner_id)
+    try:
+        _redis_client().delete(key)
+    except Exception:
+        logger.exception("Unable to clear owner statistics refresh lock.", extra={"owner_id": str(owner_id)})
+    user = get_user_model().objects.get(id=owner_id)
+    recalculate_storage_usage(user)
+    recalculate_user_profile_stats(user)
 
 
 def _required_job_types(asset):
@@ -76,8 +123,7 @@ def _finish_asset_if_processing_complete(media_asset_id):
         asset.processed_at = timezone.now()
         asset.save(update_fields=["status", "processed_at", "updated_at"])
         _update_upload_session(asset, "completed")
-        recalculate_storage_usage(asset.owner)
-        recalculate_user_profile_stats(asset.owner)
+        transaction.on_commit(lambda owner_id=asset.owner_id: schedule_owner_stats_refresh(owner_id))
 
 
 @shared_task
@@ -89,10 +135,9 @@ def process_uploaded_media(media_asset_id):
         asset.save(update_fields=["status", "processed_at", "updated_at"])
         MediaProcessingJob.objects.filter(media_asset=asset, job_type__in=_required_job_types(asset)).delete()
         if asset.media_type in {"photo", "gif"}:
-            process_photo_media.delay(str(asset.id))
+            process_photo_media(str(asset.id))
         else:
-            extract_video_metadata.delay(str(asset.id))
-            generate_video_thumbnail.delay(str(asset.id))
+            process_video_media(str(asset.id))
         return str(asset.id)
     except Exception:
         logger.exception("Media processing failed.", extra={"media_asset_id": str(asset.id)})
@@ -114,6 +159,14 @@ def _save_webp_variant(image, size, quality, key):
     body = out.getvalue()
     upload_bytes(key, body, "image/webp")
     return len(body)
+
+
+def _load_image_from_storage(key, extension):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        source_path = Path(temp_dir) / f"source.{extension or 'jpg'}"
+        download_to_file(key, source_path)
+        with Image.open(source_path) as source:
+            return ImageOps.exif_transpose(source)
 
 
 def _video_rotation_degrees(video_stream):
@@ -152,8 +205,7 @@ def process_photo_media(media_asset_id):
         "photo_metadata": _job(asset, "photo_metadata"),
     }
     try:
-        image = Image.open(io.BytesIO(download_bytes(asset.original_file_key)))
-        image = ImageOps.exif_transpose(image)
+        image = _load_image_from_storage(asset.original_file_key, asset.extension)
         original_width, original_height = image.size
 
         exif = image.getexif()
@@ -259,7 +311,7 @@ def extract_video_metadata(media_asset_id):
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             source_path = Path(temp_dir) / f"source.{asset.extension or 'mp4'}"
-            source_path.write_bytes(download_bytes(asset.original_file_key))
+            download_to_file(asset.original_file_key, source_path)
             probe = ffmpeg.probe(str(source_path))
 
         video_stream = next(
@@ -284,13 +336,63 @@ def extract_video_metadata(media_asset_id):
 
 
 @shared_task
+def process_video_media(media_asset_id):
+    asset = MediaAsset.objects.select_related("owner", "collection").get(id=media_asset_id)
+    jobs = {
+        "video_metadata": _job(asset, "video_metadata"),
+        "video_thumbnail": _job(asset, "video_thumbnail"),
+    }
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / f"source.{asset.extension or 'mp4'}"
+            download_to_file(asset.original_file_key, source_path)
+            probe = ffmpeg.probe(str(source_path))
+            video_stream = next(
+                (stream for stream in probe.get("streams", []) if stream.get("codec_type") == "video"),
+                {},
+            )
+            duration = video_stream.get("duration") or probe.get("format", {}).get("duration")
+            if duration:
+                asset.duration_seconds = max(0, round(float(duration)))
+            display_width, display_height = _video_display_dimensions(video_stream)
+            if display_width:
+                asset.original_width = display_width
+            if display_height:
+                asset.original_height = display_height
+            asset.save(update_fields=["duration_seconds", "original_width", "original_height", "updated_at"])
+            MediaAssetMetadata.objects.get_or_create(media_asset=asset)
+            _complete(jobs["video_metadata"])
+
+            body, _ = (
+                ffmpeg
+                .input(str(source_path), ss=0)
+                .filter("scale", "min(600,iw)", -2)
+                .output("pipe:", vframes=1, format="image2", vcodec="webp")
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+
+        thumbnail_key = build_thumbnail_key(asset.owner_id, asset.collection_id, asset.id)
+        upload_bytes(thumbnail_key, body, "image/webp")
+        asset.thumbnail_file_key = thumbnail_key
+        asset.thumbnail_file_size_bytes = len(body)
+        asset.save(update_fields=["thumbnail_file_key", "thumbnail_file_size_bytes", "updated_at"])
+        _complete(jobs["video_thumbnail"])
+        _finish_asset_if_processing_complete(asset.id)
+    except Exception as exc:
+        for job in jobs.values():
+            if job.status != "completed":
+                _fail(job, exc)
+        raise
+
+
+@shared_task
 def generate_video_thumbnail(media_asset_id):
     asset = MediaAsset.objects.get(id=media_asset_id)
     job = _job(asset, "video_thumbnail")
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             source_path = Path(temp_dir) / f"source.{asset.extension or 'mp4'}"
-            source_path.write_bytes(download_bytes(asset.original_file_key))
+            download_to_file(asset.original_file_key, source_path)
             body, _ = (
                 ffmpeg
                 .input(str(source_path), ss=0)

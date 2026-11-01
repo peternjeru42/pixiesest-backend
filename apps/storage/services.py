@@ -1,8 +1,19 @@
+import shutil
+from functools import lru_cache
 from pathlib import Path
 
 import boto3
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from django.conf import settings
+
+
+R2_TRANSFER_CONFIG = TransferConfig(
+    multipart_threshold=8 * 1024 * 1024,
+    multipart_chunksize=8 * 1024 * 1024,
+    max_concurrency=2,
+    use_threads=True,
+)
 
 
 def using_local_storage():
@@ -13,6 +24,7 @@ def _local_path(key):
     return Path(settings.MEDIA_ROOT) / key.lstrip("/")
 
 
+@lru_cache(maxsize=1)
 def get_r2_client():
     return boto3.client(
         "s3",
@@ -107,11 +119,42 @@ def upload_bytes(key, body, content_type):
     )
 
 
+def upload_file(key, path, content_type):
+    path = Path(path)
+    if using_local_storage():
+        destination = _local_path(key)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, destination)
+        return None
+    return get_r2_client().upload_file(
+        str(path),
+        settings.CLOUDFLARE_R2_BUCKET_NAME,
+        key,
+        ExtraArgs={"ContentType": content_type},
+        Config=R2_TRANSFER_CONFIG,
+    )
+
+
 def download_bytes(key):
     if using_local_storage():
         return _local_path(key).read_bytes()
     obj = get_r2_client().get_object(Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME, Key=key)
     return obj["Body"].read()
+
+
+def download_to_file(key, path):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if using_local_storage():
+        shutil.copyfile(_local_path(key), path)
+        return path
+    get_r2_client().download_file(
+        settings.CLOUDFLARE_R2_BUCKET_NAME,
+        key,
+        str(path),
+        Config=R2_TRANSFER_CONFIG,
+    )
+    return path
 
 
 def build_original_key(user_id, collection_id, media_id, ext):
