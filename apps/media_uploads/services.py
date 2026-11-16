@@ -10,7 +10,7 @@ from apps.collections.models import Collection
 from apps.core.utils import extension_from_filename, safe_filename
 from apps.media_assets.models import MediaAsset
 from apps.quotas.services import check_user_has_storage_space
-from apps.storage.services import build_original_key, object_exists
+from apps.storage.services import build_original_key, delete_object, object_exists
 
 from .models import MediaUploadSession
 
@@ -66,6 +66,10 @@ def create_upload_session(user, *, collection_id, set_id, original_filename, mim
 @transaction.atomic
 def complete_upload(user, upload_id, checksum=""):
     session = MediaUploadSession.objects.select_for_update().get(upload_id=upload_id, owner=user)
+    if session.status in {"processing", "completed"}:
+        return session
+    if session.status in {"cancelled", "expired"}:
+        raise ValueError("Upload session is no longer active.")
     if not object_exists(session.r2_object_key):
         session.status = "failed"
         session.save(update_fields=["status", "updated_at"])
@@ -80,6 +84,28 @@ def complete_upload(user, upload_id, checksum=""):
 
     transaction.on_commit(lambda: queue_media_processing(asset.id))
     return session
+
+
+@transaction.atomic
+def cancel_upload(user, upload_id):
+    session = MediaUploadSession.objects.select_for_update().get(upload_id=upload_id, owner=user)
+    asset = session.media_asset
+    if session.status in {"processing", "completed"} or (asset and asset.status != "uploading"):
+        return session
+
+    session.status = "cancelled"
+    session.save(update_fields=["status", "updated_at"])
+    if asset and asset.status == "uploading":
+        asset.delete()
+    transaction.on_commit(lambda: delete_upload_object(session.r2_object_key, session.upload_id))
+    return session
+
+
+def delete_upload_object(object_key, upload_id):
+    try:
+        delete_object(object_key)
+    except Exception:
+        logger.exception("Unable to delete abandoned upload object.", extra={"upload_id": upload_id})
 
 
 def queue_media_processing(asset_id):

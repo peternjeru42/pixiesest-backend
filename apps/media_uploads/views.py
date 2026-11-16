@@ -18,7 +18,7 @@ from .serializers import (
     PresignUploadSerializer,
     UploadSessionSerializer,
 )
-from .services import complete_upload, create_upload_session
+from .services import cancel_upload, complete_upload, create_upload_session
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,10 @@ class CancelUploadView(views.APIView):
     def post(self, request):
         serializer = CancelUploadSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        MediaUploadSession.objects.filter(upload_id=serializer.validated_data["upload_id"], owner=request.user).update(status="cancelled")
+        try:
+            cancel_upload(request.user, serializer.validated_data["upload_id"])
+        except MediaUploadSession.DoesNotExist:
+            return Response({"detail": "Upload session was not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response({"detail": "Upload cancelled."})
 
 

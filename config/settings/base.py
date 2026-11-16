@@ -218,6 +218,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.downloads.tasks.cleanup_expired_download_exports",
         "schedule": crontab(hour=4, minute=0),
     },
+    "cleanup-expired-uploads": {
+        "task": "apps.media_uploads.tasks.cleanup_expired_uploads",
+        "schedule": crontab(minute=15),
+    },
 }
 
 CLOUDFLARE_R2_ACCOUNT_ID = env("CLOUDFLARE_R2_ACCOUNT_ID", "")

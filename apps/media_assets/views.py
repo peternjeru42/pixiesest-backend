@@ -20,7 +20,7 @@ class MediaAssetViewSet(viewsets.ModelViewSet):
     lookup_url_kwarg = "media_id"
 
     def get_queryset(self):
-        return MediaAsset.objects.filter(owner=self.request.user).select_related("collection", "set")
+        return MediaAsset.objects.filter(owner=self.request.user).exclude(status="uploading").select_related("collection", "set")
 
     def perform_destroy(self, instance):
         instance.status = "deleted"
@@ -105,7 +105,7 @@ class CollectionMediaListView(generics.ListAPIView):
 
     def get_queryset(self):
         collection = Collection.objects.get(id=self.kwargs["collection_id"], owner=self.request.user)
-        return MediaAsset.objects.filter(collection=collection, owner=self.request.user).select_related("collection", "set")
+        return MediaAsset.objects.filter(collection=collection, owner=self.request.user).exclude(status="uploading").select_related("collection", "set")
 
 
 class SetMediaListView(generics.ListAPIView):
@@ -113,4 +113,4 @@ class SetMediaListView(generics.ListAPIView):
 
     def get_queryset(self):
         set_obj = CollectionSet.objects.get(id=self.kwargs["set_id"], collection__owner=self.request.user)
-        return MediaAsset.objects.filter(set=set_obj, owner=self.request.user).select_related("collection", "set")
+        return MediaAsset.objects.filter(set=set_obj, owner=self.request.user).exclude(status="uploading").select_related("collection", "set")
