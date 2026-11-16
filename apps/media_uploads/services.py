@@ -87,19 +87,32 @@ def complete_upload(user, upload_id, checksum=""):
     return session
 
 
-def find_duplicate_asset(asset):
+def find_duplicate_for_upload(user, collection_id, original_filename, file_size_bytes, checksum="", exclude_asset_id=None):
     candidates = MediaAsset.objects.filter(
-        owner=asset.owner,
-        collection=asset.collection,
-        file_size_bytes=asset.file_size_bytes,
-    ).exclude(id=asset.id).exclude(status__in={"uploading", "deleted"})
+        owner=user,
+        collection_id=collection_id,
+        file_size_bytes=file_size_bytes,
+    ).exclude(status__in={"uploading", "deleted"})
+    if exclude_asset_id:
+        candidates = candidates.exclude(id=exclude_asset_id)
 
-    filename_match = Q(original_filename__iexact=asset.original_filename)
-    if asset.checksum:
-        candidates = candidates.filter(Q(checksum=asset.checksum) | (Q(checksum="") & filename_match))
+    filename_match = Q(original_filename__iexact=original_filename)
+    if checksum:
+        candidates = candidates.filter(Q(checksum=checksum) | (Q(checksum="") & filename_match))
     else:
         candidates = candidates.filter(filename_match)
     return candidates.order_by("-created_at").first()
+
+
+def find_duplicate_asset(asset):
+    return find_duplicate_for_upload(
+        asset.owner,
+        asset.collection_id,
+        asset.original_filename,
+        asset.file_size_bytes,
+        asset.checksum,
+        exclude_asset_id=asset.id,
+    )
 
 
 @transaction.atomic

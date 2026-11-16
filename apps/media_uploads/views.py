@@ -15,10 +15,11 @@ from .serializers import (
     BulkPresignUploadSerializer,
     CancelUploadSerializer,
     CompleteUploadSerializer,
+    DuplicateCheckSerializer,
     PresignUploadSerializer,
     UploadSessionSerializer,
 )
-from .services import cancel_upload, complete_upload, create_upload_session, find_duplicate_asset
+from .services import cancel_upload, complete_upload, create_upload_session, find_duplicate_asset, find_duplicate_for_upload
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,32 @@ class CancelUploadView(views.APIView):
         except MediaUploadSession.DoesNotExist:
             return Response({"detail": "Upload session was not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response({"detail": "Upload cancelled."})
+
+
+class DuplicateCheckView(views.APIView):
+    def post(self, request):
+        serializer = DuplicateCheckSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        results = []
+        for item in serializer.validated_data["files"]:
+            duplicate = find_duplicate_for_upload(
+                request.user,
+                item["collection_id"],
+                item["original_filename"],
+                item["file_size_bytes"],
+                item.get("checksum", ""),
+            )
+            results.append({
+                "client_id": item["client_id"],
+                "duplicate_of": None if not duplicate else {
+                    "id": str(duplicate.id),
+                    "display_filename": duplicate.display_filename,
+                    "original_filename": duplicate.original_filename,
+                    "status": duplicate.status,
+                    "created_at": duplicate.created_at,
+                },
+            })
+        return Response({"files": results})
 
 
 class UploadSessionDetailView(generics.RetrieveAPIView):

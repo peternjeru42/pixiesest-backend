@@ -3,7 +3,9 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from apps.collections.models import Collection
 from apps.media_assets.models import MediaAsset
@@ -17,6 +19,8 @@ class UploadLifecycleTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("uploads@example.com", "password")
         self.collection = Collection.objects.create(owner=self.user, title="Upload test", slug="upload-test")
+        self.api_client = APIClient()
+        self.api_client.force_authenticate(self.user)
 
     def create_session(self, *, session_status="pending", asset_status="uploading", expired=False):
         asset = MediaAsset.objects.create(
@@ -102,3 +106,26 @@ class UploadLifecycleTests(TestCase):
         _session, uploaded = self.create_session(asset_status="processing")
 
         self.assertEqual(find_duplicate_asset(uploaded), existing)
+
+    def test_duplicate_preflight_returns_existing_match(self):
+        _session, existing = self.create_session(asset_status="ready")
+        existing.checksum = "sha256-full:preflight-match"
+        existing.save(update_fields=["checksum", "updated_at"])
+
+        response = self.api_client.post(
+            reverse("upload-duplicate-check"),
+            {
+                "files": [{
+                    "client_id": "browser-file-1",
+                    "collection_id": str(self.collection.id),
+                    "original_filename": "photo.jpg",
+                    "file_size_bytes": 100,
+                    "checksum": existing.checksum,
+                }],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["files"][0]["client_id"], "browser-file-1")
+        self.assertEqual(response.data["files"][0]["duplicate_of"]["id"], str(existing.id))

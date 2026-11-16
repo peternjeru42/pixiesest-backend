@@ -25,6 +25,18 @@ class CancelUploadSerializer(serializers.Serializer):
     upload_id = serializers.CharField()
 
 
+class DuplicateCheckItemSerializer(serializers.Serializer):
+    client_id = serializers.CharField(max_length=160)
+    collection_id = serializers.UUIDField()
+    original_filename = serializers.CharField(max_length=255)
+    file_size_bytes = serializers.IntegerField(min_value=1)
+    checksum = serializers.CharField(required=False, allow_blank=True, max_length=128)
+
+
+class DuplicateCheckSerializer(serializers.Serializer):
+    files = DuplicateCheckItemSerializer(many=True, allow_empty=False)
+
+
 class UploadSessionSerializer(serializers.ModelSerializer):
     class Meta:
         from .models import MediaUploadSession
