@@ -18,9 +18,22 @@ from .serializers import (
     PresignUploadSerializer,
     UploadSessionSerializer,
 )
-from .services import cancel_upload, complete_upload, create_upload_session
+from .services import cancel_upload, complete_upload, create_upload_session, find_duplicate_asset
 
 logger = logging.getLogger(__name__)
+
+
+def duplicate_data_for_session(session):
+    duplicate = find_duplicate_asset(session.media_asset)
+    if not duplicate:
+        return None
+    return {
+        "id": str(duplicate.id),
+        "display_filename": duplicate.display_filename,
+        "original_filename": duplicate.original_filename,
+        "status": duplicate.status,
+        "created_at": duplicate.created_at,
+    }
 
 
 def upload_url_for_request(request, session):
@@ -76,7 +89,9 @@ class CompleteUploadView(views.APIView):
         except Exception:
             logger.exception("Upload completion failed.", extra={"upload_id": upload_id, "user_id": str(request.user.id)})
             return Response({"detail": "Unable to complete upload. Check backend logs for upload completion failure."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response(UploadSessionSerializer(session).data)
+        data = UploadSessionSerializer(session).data
+        data["duplicate_of"] = duplicate_data_for_session(session)
+        return Response(data)
 
 
 class CancelUploadView(views.APIView):
@@ -128,4 +143,7 @@ class BulkCompleteUploadView(views.APIView):
         except Exception:
             logger.exception("Bulk upload completion failed.", extra={"user_id": str(request.user.id)})
             return Response({"detail": "Unable to complete uploads. Check backend logs for upload completion failure."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response({"uploads": UploadSessionSerializer(sessions, many=True).data})
+        uploads = UploadSessionSerializer(sessions, many=True).data
+        for data, session in zip(uploads, sessions):
+            data["duplicate_of"] = duplicate_data_for_session(session)
+        return Response({"uploads": uploads})

@@ -3,6 +3,7 @@ import uuid
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.collection_sets.models import CollectionSet
@@ -84,6 +85,21 @@ def complete_upload(user, upload_id, checksum=""):
 
     transaction.on_commit(lambda: queue_media_processing(asset.id))
     return session
+
+
+def find_duplicate_asset(asset):
+    candidates = MediaAsset.objects.filter(
+        owner=asset.owner,
+        collection=asset.collection,
+        file_size_bytes=asset.file_size_bytes,
+    ).exclude(id=asset.id).exclude(status__in={"uploading", "deleted"})
+
+    filename_match = Q(original_filename__iexact=asset.original_filename)
+    if asset.checksum:
+        candidates = candidates.filter(Q(checksum=asset.checksum) | (Q(checksum="") & filename_match))
+    else:
+        candidates = candidates.filter(filename_match)
+    return candidates.order_by("-created_at").first()
 
 
 @transaction.atomic

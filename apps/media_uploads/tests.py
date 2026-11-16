@@ -9,7 +9,7 @@ from apps.collections.models import Collection
 from apps.media_assets.models import MediaAsset
 
 from .models import MediaUploadSession
-from .services import cancel_upload, complete_upload
+from .services import cancel_upload, complete_upload, find_duplicate_asset
 from .tasks import cleanup_expired_uploads
 
 
@@ -81,3 +81,24 @@ class UploadLifecycleTests(TestCase):
         self.assertEqual(session.status, "expired")
         self.assertIsNotNone(asset.deleted_at)
         delete_object.assert_called_once_with(asset.original_file_key)
+
+    def test_duplicate_fingerprint_matches_only_within_collection(self):
+        _session, existing = self.create_session(asset_status="ready")
+        existing.checksum = "sha256-full:same-content"
+        existing.save(update_fields=["checksum", "updated_at"])
+        _session, uploaded = self.create_session(asset_status="processing")
+        uploaded.checksum = existing.checksum
+        uploaded.save(update_fields=["checksum", "updated_at"])
+
+        self.assertEqual(find_duplicate_asset(uploaded), existing)
+
+        other_collection = Collection.objects.create(owner=self.user, title="Other", slug="other")
+        uploaded.collection = other_collection
+        uploaded.save(update_fields=["collection", "updated_at"])
+        self.assertIsNone(find_duplicate_asset(uploaded))
+
+    def test_legacy_uploads_fall_back_to_filename_and_size(self):
+        _session, existing = self.create_session(asset_status="ready")
+        _session, uploaded = self.create_session(asset_status="processing")
+
+        self.assertEqual(find_duplicate_asset(uploaded), existing)
