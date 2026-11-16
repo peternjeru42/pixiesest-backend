@@ -79,6 +79,7 @@ LOCAL_APPS = [
     "apps.accounts.apps.AccountsConfig",
     "apps.profiles.apps.ProfilesConfig",
     "apps.quotas.apps.QuotasConfig",
+    "apps.billing.apps.BillingConfig",
     "apps.folders.apps.FoldersConfig",
     "apps.collections.apps.CollectionsConfig",
     "apps.collection_sets.apps.CollectionSetsConfig",
@@ -223,6 +224,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.media_uploads.tasks.cleanup_expired_uploads",
         "schedule": crontab(minute=15),
     },
+    "process-pending-paystack-webhooks": {
+        "task": "apps.billing.tasks.process_pending_webhooks",
+        "schedule": crontab(minute="*/5"),
+    },
+    "expire-billing-grace-periods": {
+        "task": "apps.billing.tasks.expire_billing_grace_periods",
+        "schedule": crontab(hour=3, minute=30),
+    },
 }
 
 CLOUDFLARE_R2_ACCOUNT_ID = env("CLOUDFLARE_R2_ACCOUNT_ID", "")
@@ -243,6 +252,12 @@ CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", False)
 
 FRONTEND_URL = env("FRONTEND_URL", "http://localhost:3000")
 PASSWORD_RESET_TIMEOUT = int(env("PASSWORD_RESET_TIMEOUT_SECONDS", "3600"))
+
+PAYSTACK_SECRET_KEY = env("PAYSTACK_SECRET_KEY", "")
+PAYSTACK_WEBHOOK_SECRET = env("PAYSTACK_WEBHOOK_SECRET", "")
+PAYSTACK_API_BASE_URL = env("PAYSTACK_API_BASE_URL", "https://api.paystack.co").rstrip("/")
+PAYSTACK_TIMEOUT_SECONDS = int(env("PAYSTACK_TIMEOUT_SECONDS", "20"))
+BILLING_GRACE_PERIOD_DAYS = int(env("BILLING_GRACE_PERIOD_DAYS", "7"))
 
 EMAIL_BACKEND = env("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
 EMAIL_HOST = env("EMAIL_HOST", "smtp.resend.com")

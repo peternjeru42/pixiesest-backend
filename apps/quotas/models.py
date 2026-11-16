@@ -6,8 +6,8 @@ from apps.core.models import BaseUUIDModel, TimeStampedModel
 
 class StorageQuota(BaseUUIDModel, TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="storage_quota")
-    plan_name = models.CharField(max_length=100, default="starter")
-    storage_limit_bytes = models.PositiveBigIntegerField(default=10 * 1024**3)
+    plan_name = models.CharField(max_length=100, default="free")
+    storage_limit_bytes = models.PositiveBigIntegerField(default=5 * 1024**3)
     storage_used_bytes = models.PositiveBigIntegerField(default=0)
     photo_limit = models.PositiveIntegerField(null=True, blank=True)
     video_limit = models.PositiveIntegerField(null=True, blank=True)

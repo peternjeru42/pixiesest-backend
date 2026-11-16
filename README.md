@@ -82,6 +82,31 @@ DEFAULT_FROM_EMAIL="Droptop <no-reply@yourdomain.com>"
 
 `EMAIL_HOST_PASSWORD` is also supported, but `RESEND_API_KEY` is preferred for clarity. Local development defaults to Django's console email backend unless `EMAIL_BACKEND` is explicitly set.
 
+## Payments With Paystack
+
+Droptop creates the Basic, Plus, and Pro monthly plans in Paystack automatically. Keep both Paystack values on the Railway backend and worker services; neither value belongs in the Next.js frontend:
+
+```bash
+PAYSTACK_SECRET_KEY=sk_test_xxxxx
+PAYSTACK_WEBHOOK_SECRET=whsec_xxxxx
+```
+
+Use test values until checkout, renewal, cancellation, and failed-payment behavior have been accepted. Replace both with live-mode values for production. Configure the Paystack webhook destination as:
+
+```text
+https://<your-railway-backend-domain>/api/v1/billing/webhooks/paystack/
+```
+
+The webhook handler validates the timestamped `Paystack-Signature` header and supports the legacy `x-paystack-signature` during Paystack's transition. It stores each delivery before queueing work, ignores duplicate deliveries, and retries unprocessed events through Celery Beat.
+
+The hosted checkout callback is:
+
+```text
+https://<your-frontend-domain>/billing/callback
+```
+
+`FRONTEND_URL` must match that frontend origin. Initial payments are also verified directly with Paystack before access is granted; browser callback parameters are never trusted on their own.
+
 ## Railway
 
 Set the environment variables from `.env.example` in Railway. The backend uses
