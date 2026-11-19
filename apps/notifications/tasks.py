@@ -7,9 +7,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.billing.models import PaymentTransaction, Subscription
+from apps.collections.models import Collection
 from apps.downloads.models import DownloadJob
 from apps.favorites.models import FavoriteList
 from apps.media_uploads.models import MediaUploadSession
+from apps.media_assets.models import MediaAsset
 
 from .emails import send_branded_email
 from .models import EmailLog
@@ -75,6 +77,88 @@ def send_welcome_email(user_id):
         cta_url=f"{settings.FRONTEND_URL.rstrip('/')}/collections/new",
         metrics=[("Storage included", "5 GB"), ("Plan", "Free")],
         note="You can review your storage usage and upgrade options at any time from your Droptop dashboard.",
+    )
+
+
+@shared_task(autoretry_for=(Exception,), retry_backoff=True, max_retries=3)
+def send_first_collection_email(collection_id):
+    collection = Collection.all_objects.select_related("owner").get(id=collection_id)
+    user = collection.owner
+    first_collection_id = (
+        Collection.all_objects.filter(owner=user)
+        .order_by("created_at", "id")
+        .values_list("id", flat=True)
+        .first()
+    )
+    if first_collection_id != collection.id:
+        return ""
+    log, created = _get_or_create_log(
+        dedupe_key=f"onboarding:first-collection:{user.id}",
+        owner=user,
+        collection=collection,
+        recipient_email=user.email,
+        email_type="first_collection",
+    )
+    if not created and log.status != "failed":
+        return str(log.id)
+    return _send(
+        log,
+        subject=f"Your first Droptop collection, {collection.title}, is ready",
+        preheader="Add your first photos or videos to bring your gallery to life.",
+        eyebrow="First collection created",
+        heading="Your first collection is ready.",
+        paragraphs=[
+            f"You created {collection.title}. It is private and ready for your photos and videos.",
+            "Add your files next, then preview and publish the gallery when it looks the way you want.",
+        ],
+        cta_label="Add photos and videos",
+        cta_url=f"{settings.FRONTEND_URL.rstrip('/')}/collections/{collection.id}/media/upload",
+        metrics=[("Collection", "1st"), ("Storage available", "5 GB")],
+        note="Creating a collection does not make it public. You choose when to publish and share it.",
+    )
+
+
+@shared_task(autoretry_for=(Exception,), retry_backoff=True, max_retries=3)
+def send_first_upload_email(media_asset_id):
+    asset = MediaAsset.all_objects.select_related("owner", "collection").get(id=media_asset_id)
+    if asset.media_type not in {"photo", "video"} or asset.status != "ready":
+        return ""
+    first_completed_upload_id = (
+        MediaAsset.all_objects.filter(
+            owner=asset.owner,
+            media_type__in=["photo", "video"],
+            status__in=["ready", "deleted"],
+        )
+        .order_by("created_at", "id")
+        .values_list("id", flat=True)
+        .first()
+    )
+    if first_completed_upload_id != asset.id:
+        return ""
+    log, created = _get_or_create_log(
+        dedupe_key=f"onboarding:first-upload:{asset.owner_id}",
+        owner=asset.owner,
+        collection=asset.collection,
+        recipient_email=asset.owner.email,
+        email_type="first_upload",
+    )
+    if not created and log.status != "failed":
+        return str(log.id)
+    media_label = "video" if asset.media_type == "video" else "photo"
+    return _send(
+        log,
+        subject=f"Your first {media_label} is ready in Droptop",
+        preheader=f"Your first upload to {asset.collection.title} finished processing.",
+        eyebrow="First upload complete",
+        heading="Your first upload is ready.",
+        paragraphs=[
+            f"{asset.original_filename} finished processing and is now available in {asset.collection.title}.",
+            "Keep adding files, arrange your gallery, and preview it before sharing it with clients.",
+        ],
+        cta_label="View your collection",
+        cta_url=f"{settings.FRONTEND_URL.rstrip('/')}/collections/{asset.collection_id}/media",
+        details=[("File", asset.original_filename), ("Type", media_label.title()), ("Collection", asset.collection.title)],
+        note="Your gallery stays private until you publish it.",
     )
 
 

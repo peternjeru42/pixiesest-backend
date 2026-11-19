@@ -1,4 +1,5 @@
 from django.contrib.auth.hashers import make_password
+from django.db import transaction
 from rest_framework import serializers
 
 from apps.collection_sets.serializers import CollectionSetSerializer
@@ -75,6 +76,12 @@ class CollectionSerializer(serializers.ModelSerializer):
         collection = Collection(owner=owner, **validated_data)
         collection.slug = unique_slugify(collection, collection.title, queryset=Collection.all_objects.filter(owner=owner))
         collection.save()
+        from apps.notifications.tasks import send_first_collection_email
+
+        transaction.on_commit(
+            lambda collection_id=str(collection.id): send_first_collection_email.delay(collection_id),
+            robust=True,
+        )
         return collection
 
 

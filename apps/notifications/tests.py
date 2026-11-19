@@ -10,12 +10,21 @@ from rest_framework.test import APIClient
 
 from apps.collections.models import Collection
 from apps.media_uploads.models import MediaUploadSession
+from apps.media_assets.models import MediaAsset
+from apps.media_processing.models import MediaProcessingJob
+from apps.media_processing.tasks import _finish_asset_if_processing_complete
 from apps.quotas.models import StorageQuota
 from apps.quotas.services import decrease_storage_usage, increase_storage_usage
 
 from .emails import render_branded_email
 from .models import EmailLog
-from .tasks import send_collection_invite_email, send_upload_summary_email, send_welcome_email
+from .tasks import (
+    send_collection_invite_email,
+    send_first_collection_email,
+    send_first_upload_email,
+    send_upload_summary_email,
+    send_welcome_email,
+)
 
 
 @override_settings(
@@ -78,6 +87,93 @@ class BrandedEmailTests(TestCase):
         self.assertIn("Storage included: 5 GB", mail.outbox[0].body)
         self.assertIn("Create your first gallery", mail.outbox[0].body)
         self.assertEqual(EmailLog.objects.filter(email_type="welcome_free_plan").count(), 1)
+
+    def test_first_collection_email_only_sends_for_the_first_collection(self):
+        send_first_collection_email(str(self.collection.id))
+        send_first_collection_email(str(self.collection.id))
+        later_collection = Collection.objects.create(
+            owner=self.owner,
+            title="Later Gallery",
+            slug="later-gallery",
+        )
+        send_first_collection_email(str(later_collection.id))
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("first Droptop collection", mail.outbox[0].subject)
+        self.assertIn("Add photos and videos", mail.outbox[0].body)
+        self.assertEqual(EmailLog.objects.filter(email_type="first_collection").count(), 1)
+
+    @patch("apps.notifications.tasks.send_first_collection_email.delay")
+    def test_creating_a_collection_queues_the_milestone_check(self, delay):
+        user = get_user_model().objects.create_user(email="new-collector@example.com", password="password123")
+        client = APIClient()
+        client.force_authenticate(user)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = client.post(reverse("collection-list"), {"title": "My First Gallery"}, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        delay.assert_called_once_with(response.data["id"])
+
+    def test_first_successful_photo_upload_email_only_sends_once(self):
+        first = MediaAsset.objects.create(
+            owner=self.owner,
+            collection=self.collection,
+            media_type="photo",
+            original_filename="first.jpg",
+            display_filename="first.jpg",
+            original_file_key="original/first.jpg",
+            mime_type="image/jpeg",
+            extension="jpg",
+            file_size_bytes=100,
+            status="ready",
+        )
+        send_first_upload_email(str(first.id))
+        send_first_upload_email(str(first.id))
+        later = MediaAsset.objects.create(
+            owner=self.owner,
+            collection=self.collection,
+            media_type="video",
+            original_filename="later.mp4",
+            display_filename="later.mp4",
+            original_file_key="original/later.mp4",
+            mime_type="video/mp4",
+            extension="mp4",
+            file_size_bytes=200,
+            status="ready",
+        )
+        send_first_upload_email(str(later.id))
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("first photo", mail.outbox[0].subject)
+        self.assertIn("first.jpg", mail.outbox[0].body)
+        self.assertEqual(EmailLog.objects.filter(email_type="first_upload").count(), 1)
+
+    @patch("apps.media_processing.tasks.schedule_owner_stats_refresh")
+    @patch("apps.notifications.tasks.send_first_upload_email.delay")
+    def test_first_upload_email_is_queued_after_processing_finishes(self, delay, refresh_stats):
+        asset = MediaAsset.objects.create(
+            owner=self.owner,
+            collection=self.collection,
+            media_type="photo",
+            original_filename="processed.jpg",
+            display_filename="processed.jpg",
+            original_file_key="original/processed.jpg",
+            mime_type="image/jpeg",
+            extension="jpg",
+            file_size_bytes=100,
+            status="processing",
+        )
+        for job_type in ["photo_preview", "photo_thumbnail", "photo_metadata"]:
+            MediaProcessingJob.objects.create(media_asset=asset, job_type=job_type, status="completed")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            _finish_asset_if_processing_complete(asset.id)
+
+        asset.refresh_from_db()
+        self.assertEqual(asset.status, "ready")
+        delay.assert_called_once_with(str(asset.id))
+        refresh_stats.assert_called_once_with(asset.owner_id)
 
     @patch("apps.notifications.views.send_collection_update_email.delay")
     def test_owner_can_notify_each_previous_invite_recipient_once(self, delay):

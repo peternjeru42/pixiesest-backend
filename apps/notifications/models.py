@@ -17,6 +17,8 @@ class NotificationTemplate(BaseUUIDModel, TimeStampedModel):
         ("payment_failed", "Payment failed"),
         ("storage_warning", "Storage warning"),
         ("welcome_free_plan", "Welcome to free plan"),
+        ("first_collection", "First collection created"),
+        ("first_upload", "First upload completed"),
     )
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name="notification_templates")

@@ -123,6 +123,13 @@ def _finish_asset_if_processing_complete(media_asset_id):
         asset.processed_at = timezone.now()
         asset.save(update_fields=["status", "processed_at", "updated_at"])
         _update_upload_session(asset, "completed")
+        if asset.media_type in {"photo", "video"}:
+            from apps.notifications.tasks import send_first_upload_email
+
+            transaction.on_commit(
+                lambda asset_id=str(asset.id): send_first_upload_email.delay(asset_id),
+                robust=True,
+            )
         transaction.on_commit(lambda owner_id=asset.owner_id: schedule_owner_stats_refresh(owner_id))
 
 
