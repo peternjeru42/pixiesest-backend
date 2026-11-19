@@ -7,13 +7,14 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.tokens import default_token_generator
-from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
+from apps.notifications.emails import send_branded_email
 
 from .models import SignupVerificationCode
 
@@ -42,16 +43,15 @@ def send_signup_verification_code(email):
         expires_at=now + timedelta(minutes=SIGNUP_CODE_TTL_MINUTES),
     )
     try:
-        send_mail(
-            "Your Droptop signup code",
-            (
-                "Use this code to finish creating your Droptop account:\n\n"
-                f"{code}\n\n"
-                "This code expires in 5 minutes. If you did not request it, you can ignore this email."
-            ),
-            settings.DEFAULT_FROM_EMAIL,
-            [clean_email],
-            fail_silently=False,
+        send_branded_email(
+            recipient=clean_email,
+            subject=f"{code} is your Droptop verification code",
+            preheader="Finish creating your Droptop account.",
+            eyebrow="Email verification",
+            heading="Confirm your email.",
+            paragraphs=["Use the verification code below to finish creating your Droptop account."],
+            metrics=[("Verification code", code)],
+            note="This code expires in 5 minutes. If you did not request it, you can safely ignore this email.",
         )
     except (SMTPException, OSError, TimeoutError) as exc:
         verification.delete()
@@ -208,16 +208,16 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?{urlencode({'token': reset_token})}"
 
         try:
-            send_mail(
-                "Reset your Droptop password",
-                (
-                    "We received a request to reset your Droptop password.\n\n"
-                    f"Open this link to choose a new password:\n{reset_url}\n\n"
-                    "This link expires in 1 hour. If you did not request this, you can ignore this email."
-                ),
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                fail_silently=False,
+            send_branded_email(
+                recipient=user.email,
+                subject="Reset your Droptop password",
+                preheader="A password reset was requested for your account.",
+                eyebrow="Account security",
+                heading="Reset your password.",
+                paragraphs=["We received a request to reset the password for your Droptop account."],
+                cta_label="Choose a new password",
+                cta_url=reset_url,
+                note="This link expires in 1 hour. If you did not request a reset, you can safely ignore this email.",
             )
         except (SMTPException, OSError, TimeoutError) as exc:
             raise EmailDeliveryError("Password reset email could not be sent.") from exc

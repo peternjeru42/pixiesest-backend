@@ -45,5 +45,9 @@ class SendInviteSerializer(serializers.Serializer):
     message = serializers.CharField(required=False, allow_blank=True, max_length=1200)
 
 
+class SendCollectionUpdateSerializer(serializers.Serializer):
+    message = serializers.CharField(required=False, allow_blank=True, max_length=1200)
+
+
 class SendReminderSerializer(serializers.Serializer):
     recipient_email = serializers.EmailField(required=False)

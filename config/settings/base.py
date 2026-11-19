@@ -266,7 +266,7 @@ EMAIL_HOST_USER = env("EMAIL_HOST_USER", "resend")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD") or env("RESEND_API_KEY", "")
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
 EMAIL_TIMEOUT = int(env("EMAIL_TIMEOUT", "20"))
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "Droptop <no-reply@example.com>")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "Droptop <noreply@droptop.app>")
 
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", "")
 

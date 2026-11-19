@@ -12,7 +12,7 @@ from .serializers import EmailDeliveryError, send_signup_verification_code
 
 class SignupEmailDeliveryTests(TestCase):
     def test_signup_email_timeout_removes_unsent_code(self):
-        with patch("apps.accounts.serializers.send_mail", side_effect=TimeoutError("timed out")):
+        with patch("apps.accounts.serializers.send_branded_email", side_effect=TimeoutError("timed out")):
             with self.assertRaises(EmailDeliveryError):
                 send_signup_verification_code("User@Example.com")
 
@@ -29,7 +29,7 @@ class SignupEmailDeliveryTests(TestCase):
             "phone_number": "",
         }
 
-        with patch("apps.accounts.serializers.send_mail", side_effect=TimeoutError("timed out")):
+        with patch("apps.accounts.serializers.send_branded_email", side_effect=TimeoutError("timed out")):
             response = client.post(reverse("auth-register"), payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)

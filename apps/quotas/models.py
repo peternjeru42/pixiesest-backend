@@ -13,6 +13,8 @@ class StorageQuota(BaseUUIDModel, TimeStampedModel):
     video_limit = models.PositiveIntegerField(null=True, blank=True)
     collection_limit = models.PositiveIntegerField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    storage_warning_level = models.PositiveSmallIntegerField(default=0)
+    storage_warning_cycle = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return f"{self.user.email} quota"

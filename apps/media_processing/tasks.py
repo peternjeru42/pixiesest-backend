@@ -147,8 +147,17 @@ def process_uploaded_media(media_asset_id):
 
 def _update_upload_session(asset, status):
     from apps.media_uploads.models import MediaUploadSession
+    from apps.notifications.tasks import send_upload_summary_email
 
-    MediaUploadSession.objects.filter(media_asset=asset).update(status=status, updated_at=timezone.now())
+    session = MediaUploadSession.objects.filter(media_asset=asset).first()
+    if not session:
+        return
+    session.status = status
+    session.save(update_fields=["status", "updated_at"])
+    try:
+        send_upload_summary_email.apply_async(args=[str(session.id)], countdown=120)
+    except Exception:
+        logger.exception("Unable to queue upload summary email.", extra={"upload_session_id": str(session.id)})
 
 
 def _save_webp_variant(image, size, quality, key):

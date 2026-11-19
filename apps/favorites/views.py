@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.db import transaction
 from rest_framework import generics, permissions, status, views
 from rest_framework.response import Response
 
@@ -89,6 +90,9 @@ class PublicFavoriteSubmitView(views.APIView):
         fav.submitted_at = timezone.now()
         fav.save(update_fields=["status", "submitted_at", "updated_at"])
         _favorite_activity(fav, "submitted")
+        from apps.notifications.tasks import send_favorite_submitted_email
+
+        transaction.on_commit(lambda: send_favorite_submitted_email.delay(str(fav.id)))
         return Response(FavoriteListSerializer(fav).data)
 
 

@@ -11,10 +11,11 @@ from .serializers import (
     MarkNotificationsReadSerializer,
     NotificationTemplateSerializer,
     SendInviteSerializer,
+    SendCollectionUpdateSerializer,
     SendReminderSerializer,
     UnreadNotificationSerializer,
 )
-from .tasks import send_collection_invite_email
+from .tasks import send_collection_invite_email, send_collection_update_email
 
 
 class SendCollectionInviteView(views.APIView):
@@ -36,6 +37,49 @@ class SendCollectionInviteView(views.APIView):
             log.save(update_fields=["status", "error_message"])
             return Response({"detail": "Email queue unavailable. The invite was not sent."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response({"detail": "Invite queued."}, status=status.HTTP_202_ACCEPTED)
+
+
+class SendCollectionUpdateView(views.APIView):
+    def post(self, request, collection_id):
+        collection = Collection.objects.get(id=collection_id, owner=request.user)
+        if collection.status != "published":
+            return Response({"detail": "Publish the collection before notifying recipients."}, status=status.HTTP_409_CONFLICT)
+        serializer = SendCollectionUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        recipients = list(
+            EmailLog.objects.filter(
+                owner=request.user,
+                collection=collection,
+                email_type="collection_invite",
+                status__in=["queued", "sent"],
+            )
+            .order_by()
+            .values_list("recipient_email", flat=True)
+            .distinct()
+        )
+        queued = 0
+        for recipient in recipients:
+            log = EmailLog.objects.create(
+                owner=request.user,
+                collection=collection,
+                recipient_email=recipient,
+                email_type="collection_updated",
+            )
+            try:
+                send_collection_update_email.delay(str(log.id), serializer.validated_data.get("message", ""))
+            except Exception as exc:
+                log.status = "failed"
+                log.error_message = f"Email queue unavailable: {exc}"
+                log.save(update_fields=["status", "error_message"])
+                continue
+            queued += 1
+        return Response(
+            {
+                "detail": "Gallery update notifications queued." if queued else "No previous invite recipients were found.",
+                "queued": queued,
+            },
+            status=status.HTTP_202_ACCEPTED if queued else status.HTTP_200_OK,
+        )
 
 
 class SendFavoriteReminderView(views.APIView):

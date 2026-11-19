@@ -53,6 +53,9 @@ def _process_charge_success(data):
         subscription.next_payment_at = None
         subscription.save(update_fields=["status", "grace_period_ends_at", "next_payment_at", "updated_at"])
         apply_plan_entitlements(subscription.user, plan)
+        from apps.notifications.tasks import send_payment_success_email
+
+        transaction.on_commit(lambda: send_payment_success_email.delay(str(payment.id)), robust=True)
     return {"subscription_id": str(subscription.id)}
 
 
@@ -83,6 +86,12 @@ def process_event(event):
         subscription = find_subscription_from_paystack_data(data)
         if subscription:
             mark_subscription_past_due(subscription)
+            from apps.notifications.tasks import send_payment_failed_email
+
+            transaction.on_commit(
+                lambda: send_payment_failed_email.delay(str(subscription.id), str(event.id)),
+                robust=True,
+            )
             result = {"subscription_id": str(subscription.id)}
     elif event_type == "subscription.not_renew":
         subscription = find_subscription_from_paystack_data(data)

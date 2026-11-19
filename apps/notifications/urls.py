@@ -6,12 +6,14 @@ from .views import (
     NotificationTemplateDetailView,
     NotificationTemplateListCreateView,
     SendCollectionInviteView,
+    SendCollectionUpdateView,
     SendFavoriteReminderView,
     UnreadNotificationListView,
 )
 
 urlpatterns = [
     path("collections/<uuid:collection_id>/send-invite/", SendCollectionInviteView.as_view(), name="collection-send-invite"),
+    path("collections/<uuid:collection_id>/notify-update/", SendCollectionUpdateView.as_view(), name="collection-notify-update"),
     path("favorites/<uuid:favorite_list_id>/send-reminder/", SendFavoriteReminderView.as_view(), name="favorite-send-reminder"),
     path("notifications/unread/", UnreadNotificationListView.as_view(), name="notifications-unread"),
     path("notifications/mark-read/", MarkNotificationsReadView.as_view(), name="notifications-mark-read"),

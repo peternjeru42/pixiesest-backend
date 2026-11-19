@@ -187,6 +187,9 @@ def fulfill_verified_payment(payment, data):
     payment.provider_payload = _safe_payment_payload(data)
     payment.save()
     apply_plan_entitlements(payment.user, payment.plan)
+    from apps.notifications.tasks import send_payment_success_email
+
+    transaction.on_commit(lambda: send_payment_success_email.delay(str(payment.id)), robust=True)
     return subscription, replaced_ids
 
 

@@ -11,6 +11,11 @@ class NotificationTemplate(BaseUUIDModel, TimeStampedModel):
         ("favorite_list_submitted", "Favorite list submitted"),
         ("password_reset", "Password reset"),
         ("email_verification", "Email verification"),
+        ("upload_summary", "Upload summary"),
+        ("collection_updated", "Collection updated"),
+        ("billing_receipt", "Billing receipt"),
+        ("payment_failed", "Payment failed"),
+        ("storage_warning", "Storage warning"),
     )
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name="notification_templates")
@@ -30,6 +35,7 @@ class EmailLog(BaseUUIDModel):
     collection = models.ForeignKey("collections.Collection", on_delete=models.SET_NULL, null=True, blank=True)
     recipient_email = models.EmailField()
     email_type = models.CharField(max_length=80)
+    dedupe_key = models.CharField(max_length=255, unique=True, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="queued")
     provider_message_id = models.CharField(max_length=255, blank=True)
     error_message = models.TextField(blank=True)

@@ -139,10 +139,18 @@ def delete_upload_object(object_key, upload_id):
 
 def queue_media_processing(asset_id):
     from apps.media_processing.tasks import process_uploaded_media
+    from apps.notifications.tasks import send_upload_summary_email
 
     try:
         process_uploaded_media.delay(str(asset_id))
     except Exception:
         logger.exception("Unable to enqueue media processing.", extra={"media_asset_id": str(asset_id)})
         MediaAsset.objects.filter(id=asset_id).update(status="failed", updated_at=timezone.now())
-        MediaUploadSession.objects.filter(media_asset_id=asset_id).update(status="failed", updated_at=timezone.now())
+        session = MediaUploadSession.objects.filter(media_asset_id=asset_id).first()
+        if session:
+            session.status = "failed"
+            session.save(update_fields=["status", "updated_at"])
+            try:
+                send_upload_summary_email.apply_async(args=[str(session.id)], countdown=120)
+            except Exception:
+                logger.exception("Unable to queue failed upload summary.", extra={"upload_session_id": str(session.id)})

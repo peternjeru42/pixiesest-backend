@@ -40,6 +40,13 @@ def _generate_zip(download_job_id, quality="original"):
         job.status = "completed"
         job.completed_at = timezone.now()
         job.save(update_fields=["zip_file_key", "file_size_bytes", "status", "completed_at", "updated_at"])
+        from apps.notifications.tasks import send_client_download_email, send_download_ready_email
+
+        try:
+            send_download_ready_email.delay(str(job.id))
+            send_client_download_email.delay(str(job.id))
+        except Exception:
+            logger.exception("Unable to queue download notifications.", extra={"download_job_id": str(job.id)})
     except Exception:
         job.status = "failed"
         job.completed_at = timezone.now()

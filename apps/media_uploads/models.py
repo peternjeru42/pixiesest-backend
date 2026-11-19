@@ -27,6 +27,7 @@ class MediaUploadSession(BaseUUIDModel, TimeStampedModel):
     r2_object_key = models.CharField(max_length=500)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True)
     expires_at = models.DateTimeField(db_index=True)
+    notification_sent_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["-created_at"]
