@@ -6,7 +6,7 @@ from google.auth import exceptions as google_auth_exceptions
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from .models import SignupVerificationCode
+from .models import SignupVerificationCode, User
 from .serializers import EmailDeliveryError, send_signup_verification_code
 
 
@@ -52,3 +52,54 @@ class SignupEmailDeliveryTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
         self.assertEqual(response.data["detail"], "Google authentication is temporarily unavailable. Please try again.")
+
+    @override_settings(GOOGLE_CLIENT_ID="google-client-id")
+    def test_google_signup_logs_in_an_existing_google_account(self):
+        user = User.objects.create_user(
+            email="existing@example.com",
+            google_sub="google-user-123",
+            password=None,
+        )
+        google_profile = {
+            "iss": "https://accounts.google.com",
+            "sub": "google-user-123",
+            "email": user.email,
+            "email_verified": True,
+        }
+
+        with patch("apps.accounts.views.id_token.verify_oauth2_token", return_value=google_profile):
+            response = APIClient().post(
+                reverse("auth-google"),
+                {"credential": "credential", "intent": "signup"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["user"]["id"], str(user.id))
+        self.assertIn("access", response.data)
+        self.assertIn("refresh", response.data)
+
+    @override_settings(GOOGLE_CLIENT_ID="google-client-id")
+    def test_google_signup_links_and_logs_in_an_existing_email_account(self):
+        user = User.objects.create_user(
+            email="existing@example.com",
+            password="strong-password",
+        )
+        google_profile = {
+            "iss": "https://accounts.google.com",
+            "sub": "google-user-456",
+            "email": user.email,
+            "email_verified": True,
+        }
+
+        with patch("apps.accounts.views.id_token.verify_oauth2_token", return_value=google_profile):
+            response = APIClient().post(
+                reverse("auth-google"),
+                {"credential": "credential", "intent": "signup"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["user"]["id"], str(user.id))
+        user.refresh_from_db()
+        self.assertEqual(user.google_sub, "google-user-456")
