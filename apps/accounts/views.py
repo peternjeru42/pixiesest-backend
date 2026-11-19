@@ -137,6 +137,9 @@ class GoogleAuthView(APIView):
                     profile_photo_url=google_profile.get("picture", ""),
                     last_login=timezone.now(),
                 )
+                from apps.notifications.tasks import send_welcome_email
+
+                transaction.on_commit(lambda user_id=str(user.id): send_welcome_email.delay(user_id), robust=True)
             else:
                 if user.google_sub and user.google_sub != google_sub:
                     raise AuthenticationFailed("This email is already linked to another Google account.")

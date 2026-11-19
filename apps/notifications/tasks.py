@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
@@ -45,6 +46,36 @@ def _send(log, **email):
         log.save(update_fields=["status", "error_message"])
         raise
     return str(log.id)
+
+
+@shared_task(autoretry_for=(Exception,), retry_backoff=True, max_retries=3)
+def send_welcome_email(user_id):
+    user = get_user_model().objects.get(id=user_id)
+    log, created = _get_or_create_log(
+        dedupe_key=f"welcome-free-plan:{user.id}",
+        owner=user,
+        recipient_email=user.email,
+        email_type="welcome_free_plan",
+    )
+    if not created and log.status != "failed":
+        return str(log.id)
+    first_name = (user.first_name or "").strip()
+    greeting = f"Welcome, {first_name}." if first_name else "Welcome to Droptop."
+    return _send(
+        log,
+        subject="Welcome to Droptop — your free 5 GB is ready",
+        preheader="Your Free plan includes 5 GB of storage for photos and videos.",
+        eyebrow="Your Droptop account",
+        heading=greeting,
+        paragraphs=[
+            "Your account starts on the Free plan with 5 GB of storage available for your photos and videos.",
+            "Create your first gallery whenever you are ready. No payment is required to use your free allocation.",
+        ],
+        cta_label="Create your first gallery",
+        cta_url=f"{settings.FRONTEND_URL.rstrip('/')}/collections/new",
+        metrics=[("Storage included", "5 GB"), ("Plan", "Free")],
+        note="You can review your storage usage and upgrade options at any time from your Droptop dashboard.",
+    )
 
 
 @shared_task(autoretry_for=(Exception,), retry_backoff=True, max_retries=3)

@@ -15,7 +15,7 @@ from apps.quotas.services import decrease_storage_usage, increase_storage_usage
 
 from .emails import render_branded_email
 from .models import EmailLog
-from .tasks import send_collection_invite_email, send_upload_summary_email
+from .tasks import send_collection_invite_email, send_upload_summary_email, send_welcome_email
 
 
 @override_settings(
@@ -68,6 +68,16 @@ class BrandedEmailTests(TestCase):
         self.assertNotIn("Download PIN", email.body)
         log.refresh_from_db()
         self.assertEqual(log.status, "sent")
+
+    def test_welcome_email_explains_the_free_allocation_and_only_sends_once(self):
+        send_welcome_email(str(self.owner.id))
+        send_welcome_email(str(self.owner.id))
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("free 5 GB", mail.outbox[0].subject)
+        self.assertIn("Storage included: 5 GB", mail.outbox[0].body)
+        self.assertIn("Create your first gallery", mail.outbox[0].body)
+        self.assertEqual(EmailLog.objects.filter(email_type="welcome_free_plan").count(), 1)
 
     @patch("apps.notifications.views.send_collection_update_email.delay")
     def test_owner_can_notify_each_previous_invite_recipient_once(self, delay):

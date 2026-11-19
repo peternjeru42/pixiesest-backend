@@ -170,6 +170,9 @@ class RegisterVerifySerializer(serializers.Serializer):
         )
         verification.consumed_at = timezone.now()
         verification.save(update_fields=["consumed_at"])
+        from apps.notifications.tasks import send_welcome_email
+
+        transaction.on_commit(lambda user_id=str(user.id): send_welcome_email.delay(user_id), robust=True)
         return user
 
 
